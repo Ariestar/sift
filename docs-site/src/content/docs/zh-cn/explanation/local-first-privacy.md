@@ -11,20 +11,15 @@ description: sivtr 如何让 Agent memory、终端输出和 transcript 保持在
 
 - shell 集成产生的 shell session log；
 - 捕获终端输出的本地 SQLite history；
+- 统一 session archive（`archive.db`）；
 - provider 自己的 Agent transcript 文件或数据库；
 - 平台配置目录下的本地配置。
 
 默认不提供托管 transcript 服务。
 
-## 显式导出
+## 本地 archive
 
-导出是显式用户动作。例如 Codex mirror 需要目标路径：
-
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-```
-
-导出后，普通文件系统权限和你的共享设置决定谁能读取导出的树。
+终端捕获和 Agent session 会同步进一个本地 SQLite archive（`archive.db`），位于 sivtr 的 data 目录下。这个过程中没有任何数据离开本机：原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
 
 ## 显式远程分享
 
@@ -47,17 +42,6 @@ sivtr remote add desk <invite> # peer 在其 workspace 里给 remote 起名
 公开服务接收 AES-256-GCM 密文，以及 publication ID、`X-Sivtr-Management-Token` 和 `X-Sivtr-Published-At` 等发布请求元数据。解密密钥位于链接 fragment，不会随 HTTP 请求发送给托管服务；因此查看者无需账号，发布者设备离线也不影响查看。链接持有者均可阅读，默认 7 天失效（可选 2h/1d/3d/30d），可以在本机用 `sivtr publish revoke` 提前撤销。管理凭据只保存在独立的 `publication-state.db`；数据库丢失时没有账号恢复路径。
 
 发布前必须检查 `preview` 的最终文本和风险报告。高置信度 token、私钥、Bearer 和 secret assignment 会自动替换为 `[REDACTED]`；路径、邮箱和内网地址不会擅自改写，命令行发布需要显式使用 `--allow-warnings`，TUI 发布则会要求明确确认。
-
-## 共享 mirror 应尽量只读
-
-在本机多账号之间共享导出 session 时，建议给消费者只读权限：
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-共享/镜像的 Codex tree 只参与显式 picker 浏览，不会覆盖隐式当前 session 查找。
 
 ## 剪贴板是输出边界
 
@@ -84,10 +68,9 @@ max_entries = 0
 
 ## 良好操作习惯
 
-- 除非访问权限可控，否则不要导出包含秘密的目录。
+- 把 archive 当作源 transcript 对待：它包含同样的敏感文本，注意其存放位置和访问权限。
 - 把内容粘贴到公开聊天、issue、托管 Agent 或外部 AI 工具前，先检查复制文本。
 - 用 line 和 regex filter 只复制必要证据。
-- 共享 Codex mirror 与源账号 live config 分开。
 - 工具链使用 `--format json` / `--refs` search 输出时，也要记住 JSON content 可能包含敏感文本。
 - 协作结束后优先用短寿命 invite，并用 `sivtr share revoke` 撤销 grant。
 

@@ -83,4 +83,4 @@ sivtr search agent --match "panic" --format timeline
 
 ## 默认本地优先
 
-`sivtr` 读取本地 shell 日志、本地 history 和本地 Agent transcript。跨设备访问通过 [远程访问](/zh-cn/usage/remote-access/) 显式开启。共享 Codex 树也需要显式 export 和配置。数据位置见 [数据位置](/zh-cn/reference/data-locations/)。
+`sivtr` 读取本地 shell 日志、本地 history 和本地 Agent transcript。跨设备访问通过 [远程访问](/zh-cn/usage/remote-access/) 显式开启。数据位置见 [数据位置](/zh-cn/reference/data-locations/)。

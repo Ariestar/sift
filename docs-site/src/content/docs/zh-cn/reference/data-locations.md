@@ -68,22 +68,17 @@ max_entries = 0
 
 各 provider 格式不同；`sivtr` 会把它们归一化为 session 和 dialogue unit，用于 copy、picker、search 和 show 工作流。
 
-## Codex 导出 mirror
+## 统一 archive
 
-`codex export` 会把本地 Codex session 文件复制到你选择的目标目录：
+search、show、copy、picker、TUI 和 MCP 查询都从统一的本地 archive 读取，而不是每次解析原生 session 文件。
 
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-```
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%\sivtr\archive.db` |
+| macOS | `~/Library/Application Support/sivtr/archive.db` |
+| Linux | `~/.config/sivtr/archive.db` |
 
-目标目录会包含一个 `sessions/` 树。另一个账号可通过配置读取：
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-共享 mirror 尽量使用只读权限。
+它是一个 SQLite 数据库（WAL 模式），由 sync 引擎写入：`sivtr sync` 显式执行一次同步，查询在 archive 比 `[sync].max_age_secs` 更旧时也会自动执行新鲜度同步。原生 Agent session 文件和 shell session log 仍是 source of truth，只有 sync 引擎会读取它们。可用 `SIVTR_DATA_DIR` 覆盖根目录。
 
 ## 生成的启动器
 

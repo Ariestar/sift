@@ -31,6 +31,7 @@ sivtr/
 `- crates/
    `- sivtr-core/
       `- src/
+         |- archive/         # unified SQLite archive (archive.db) + sync engine
          |- agents/          # AgentProvider registry + per-provider parsers
          |- buffer/
          |- capture/
@@ -54,7 +55,7 @@ sivtr/
 | `commands/capture/` | run, pipe, copy, init, flush, import, diff, clear, browse |
 | `commands/memory/` | search, filter, var, nav, zoom, show, work, WorkSet store |
 | `commands/remote/` | serve, share, remote (git-remote style names), peer, workspace list |
-| `commands/system/` | config, doctor, history, hotkey, codex export, migrate, version |
+| `commands/system/` | config, doctor, history, hotkey, migrate, sync, version |
 | `remote/` | device daemon, identity, SQLite state, protocol, local IPC |
 | `app.rs` | captured-output browser state machine |
 | `tui/` | terminal setup, event handling, browser rendering, workspace rendering |
@@ -66,6 +67,7 @@ This layer can depend on terminal UI libraries, platform APIs, process spawning,
 
 | Module | Responsibility |
 | --- | --- |
+| `archive` | Unified SQLite archive (`archive.db`), schema, and the sync engine that fills it |
 | `agents` | `AgentProvider` registry plus per-provider discovery/parsing (Codex, Claude, Cursor, OpenCode, OpenClaw, Hermes, Grok, Pi, …) |
 | `record` | `WorkRecord`, `WorkPart`, `WorkRef` as `WorkScope` + `WorkPath` + `WorkAt` (`[scope:]path[/at]`) |
 | `query` | load workspace records and local-shaped sources for CLI and daemon |
@@ -118,6 +120,14 @@ Workspace picker/search:
 
 ```text
 terminal context + provider sessions -> WorkspaceSession list -> search/pick/show -> clipboard/stdout/json
+```
+
+## Unified archive
+
+Queries (search, show, copy, TUI, MCP) read from one local SQLite archive (`archive.db`) instead of parsing native files on every run. The sync engine — `sivtr sync`, plus an automatic freshness pass on query — fills the archive from every agent provider and every workspace's terminal logs. Native session files remain the source of truth and are only read by the sync engine.
+
+```text
+terminal logs + provider sessions -> sync (stat-stamp compare) -> archive.db -> query paths
 ```
 
 ## Remote memory flow

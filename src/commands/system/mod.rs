@@ -1,4 +1,3 @@
-pub mod codex;
 pub mod config;
 pub mod doctor;
 pub mod history;
@@ -6,5 +5,6 @@ pub mod hotkey;
 pub mod mcp;
 pub mod setup;
 pub mod skill;
+pub mod sync;
 pub mod update;
 pub mod version;

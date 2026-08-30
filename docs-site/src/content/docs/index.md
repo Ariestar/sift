@@ -82,4 +82,4 @@ Terminal sources produce command blocks. Agent providers produce conversation bl
 
 ## Local by default
 
-`sivtr` reads local shell logs, local history, and local agent transcripts. Cross-device access is opt-in through [Remote Access](/usage/remote-access/). Shared Codex trees are also opt-in through explicit export and configuration. See [Data Locations](/reference/data-locations/) for where records live.
+`sivtr` reads local shell logs, local history, and local agent transcripts. Cross-device access is opt-in through [Remote Access](/usage/remote-access/). See [Data Locations](/reference/data-locations/) for where records live.

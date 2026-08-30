@@ -3,7 +3,7 @@ title: 配置
 description: 创建、查看、编辑并理解 sivtr 配置。
 ---
 
-`sivtr` 使用平台配置目录中的 TOML 配置文件。配置控制编辑器交接、history 保留、Codex mirror、TUI 主题、MCP idle 退出和 Windows 热键按键。
+`sivtr` 使用平台配置目录中的 TOML 配置文件。配置控制编辑器交接、history 保留、archive 同步新鲜度、TUI 主题、MCP idle 退出和 Windows 热键按键。
 
 ## 命令
 
@@ -29,8 +29,8 @@ command = ""
 auto_save = true
 max_entries = 0
 
-[codex]
-session_dirs = []
+[sync]
+max_age_secs = 15
 
 [hotkey]
 chord = "alt+y"
@@ -59,23 +59,17 @@ max_entries = 0
 
 `max_entries = 0` 表示无限制。如果不希望 pipe 和 run capture 自动写入 history，设置 `auto_save = false`。
 
-## 共享 Codex session tree
+## Archive 同步新鲜度
 
-当另一个账号发布只读副本时，添加共享的 Codex session tree：
+查询从统一的本地 archive（`archive.db`）读取。当 archive 比 `[sync].max_age_secs` 更旧时，查询会先触发一次增量同步：
 
 ```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
+[sync]
+# archive 距上次同步多少秒后，查询会触发一次增量重同步。0 = 每次查询都重新列目录。
+max_age_secs = 15
 ```
 
-从源账号创建共享树：
-
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-```
-
-目前只有 Codex 有一等共享 mirror 配置。其他 Agent provider 从自己的本地 provider 位置读取。见[数据位置](/zh-cn/reference/data-locations/)。
+`0` 表示每次查询都重新列目录；调大则以新鲜度换延迟。用 `sivtr sync` 可强制执行一次同步。见[数据位置](/zh-cn/reference/data-locations/)。
 
 ## 热键按键
 

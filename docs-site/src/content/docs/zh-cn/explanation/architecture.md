@@ -31,6 +31,7 @@ sivtr/
 `- crates/
    `- sivtr-core/
       `- src/
+         |- archive/         # unified SQLite archive (archive.db) + sync engine
          |- agents/          # AgentProvider registry + per-provider parsers
          |- buffer/
          |- capture/
@@ -55,7 +56,7 @@ sivtr/
 | `commands/memory/` | search、filter、var、nav、zoom、show、work、WorkSet store |
 | `commands/remote/` | serve、share、remote（git-remote 风格命名）、peer、workspace list |
 | `commands/publish/` | 本地 WorkSet 的隐私投影、AES-GCM envelope、公开链接状态与撤销 |
-| `commands/system/` | config、doctor、history、hotkey、codex export、migrate、version |
+| `commands/system/` | config、doctor、history、hotkey、migrate、sync、version |
 | `remote/` | 设备 daemon、identity、SQLite state、protocol、本地 IPC |
 | `app.rs` | 捕获输出 browser 状态机 |
 | `tui/` | 终端设置、事件处理、browser 渲染、workspace 渲染 |
@@ -67,6 +68,7 @@ sivtr/
 
 | 模块 | 责任 |
 | --- | --- |
+| `archive` | 统一 SQLite archive（`archive.db`）、schema，以及填充它的 sync 引擎 |
 | `agents` | `AgentProvider` registry 以及各 provider 发现/解析（Codex、Claude、Cursor、OpenCode、OpenClaw、Hermes、Grok、Pi…） |
 | `record` | `WorkRecord`、`WorkPart`、`WorkRef` = `WorkScope` + `WorkPath` + `WorkAt`（`[scope:]path[/at]`） |
 | `query` | 为 CLI 和 daemon 加载 workspace records 与 local-shaped sources |
@@ -119,6 +121,14 @@ Workspace picker/search：
 
 ```text
 terminal context + provider sessions -> WorkspaceSession list -> search/pick/show -> clipboard/stdout/json
+```
+
+## 统一 archive
+
+查询（search、show、copy、TUI、MCP）从统一的本地 SQLite archive（`archive.db`）读取，而不是每次运行都解析原生文件。sync 引擎——`sivtr sync`，加上查询时自动的新鲜度同步——把每个 Agent provider 和每个 workspace 的终端日志写入 archive。原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
+
+```text
+终端 log + provider session -> sync（stat stamp 比对）-> archive.db -> 查询路径
 ```
 
 ## Remote memory 流程

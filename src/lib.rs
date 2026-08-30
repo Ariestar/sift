@@ -111,8 +111,8 @@ fn run() -> Result<()> {
         Some(Commands::Hotkey(cmd)) => {
             commands::system::hotkey::execute(cmd)?;
         }
-        Some(Commands::Codex(cmd)) => {
-            commands::system::codex::execute(cmd)?;
+        Some(Commands::Sync(args)) => {
+            commands::system::sync::execute(&args)?;
         }
         Some(Commands::Config(cfg_cmd)) => {
             commands::system::config::execute(cfg_cmd)?;

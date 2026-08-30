@@ -76,23 +76,6 @@ Use `--cwd` with search/show flows when running from another directory:
 sivtr search agent --match "panic" --cwd /path/to/project --format timeline
 ```
 
-## `sivtr copy codex` selects the wrong account's session
-
-Implicit current-session lookup stays local by design. Shared Codex mirrors from `[codex].session_dirs` only participate in explicit picker browsing.
-
-Use:
-
-```bash
-sivtr copy codex --pick
-```
-
-If you need a shared tree, configure it explicitly:
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
 ## Clipboard copy fails on Linux
 
 Clipboard support depends on the desktop/session environment. Wayland, X11, SSH, and headless environments can behave differently.

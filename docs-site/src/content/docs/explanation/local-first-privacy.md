@@ -11,20 +11,15 @@ description: How sivtr keeps agent memory, terminal output, and transcripts unde
 
 - shell session logs from shell integration;
 - local SQLite history for captured terminal output;
+- the unified session archive (`archive.db`);
 - provider-owned agent transcript files or databases;
 - local config under the platform config directory.
 
 It does not provide a hosted transcript service by default.
 
-## Explicit export
+## The local archive
 
-Export is an explicit user action. For example, Codex mirrors require a destination path:
-
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-```
-
-After export, normal file-system permissions and your sharing setup control who can read the exported tree.
+Terminal captures and agent sessions sync into one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth and are only read by the sync engine.
 
 ## Explicit remote share
 
@@ -43,17 +38,6 @@ Full guide: [Remote Access](/usage/remote-access/).
 `sivtr publish` is a separate outbound boundary: an immutable snapshot from a local WorkSet, not a live mount. Whole-record WorkSets use v1 and project consecutive User/Assistant turns from one local agent session; `publish preview` without a source opens the existing TUI to select non-contiguous User, Assistant, Tool, Skill, and Thinking atoms within one session. Raw WorkSets, WorkRefs, `cwd`, session paths, and provider envelopes stay local; only the projected, redacted snapshot enters the encrypted envelope. The hosted service stores AES-256-GCM ciphertext; the viewing key stays in the URL fragment. `[publish].endpoint` defaults to `https://share.hnnulwh.cn` and can be changed in `config.toml`; there is no automatic failover between self-host and Cloudflare.
 
 Guide: [Publish conversation links](/usage/publish/).
-
-## Shared mirrors should be read-only
-
-When sharing exported sessions across local accounts, prefer read-only access for consumers:
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-Shared/mirrored Codex trees only participate in explicit picker browsing. They do not override implicit current-session lookup.
 
 ## Clipboard is an output boundary
 
@@ -80,10 +64,9 @@ Set `auto_save = false` if captures should not be written automatically. Set `ma
 
 ## Good operational habits
 
-- Avoid exporting directories that include secrets unless access is controlled.
+- Treat the archive like the source transcripts: it holds the same sensitive text, so protect its location and access.
 - Review copied text before pasting it into public chats, issues, hosted agents, or external AI tools.
 - Use line and regex filters to copy only the necessary evidence.
-- Keep shared Codex mirrors separate from the source account's live config.
 - Prefer `--format json` / `--refs` search output for tooling, but remember JSON content can still include sensitive text.
 - Prefer short-lived invites and revoke grants (`sivtr share revoke`) when collaboration ends.
 

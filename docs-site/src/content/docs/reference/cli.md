@@ -890,35 +890,29 @@ sivtr hotkey status
 sivtr hotkey stop
 ```
 
-## codex export
+## sync
 
 ```bash
-sivtr codex export --dest <PATH> [OPTIONS]
+sivtr sync [--full] [--json]
 ```
 
-Exports local Codex rollout JSONL files into a target directory containing a `sessions/` tree.
+Syncs every agent provider's sessions and every workspace's terminal logs into the unified local archive (`archive.db`). Queries (search, show, copy, TUI, MCP) read from this archive; when it is older than `[sync].max_age_secs` (default `15` seconds), a query first triggers an incremental re-sync.
 
 Options:
 
 | Option | Meaning |
 | --- | --- |
-| `--dest <PATH>` | Destination directory that will receive the `sessions/` tree |
-| `--limit <N>` | Keep only newest N session files; `0` means export all |
-| `--watch` | Continue mirroring with native filesystem wakeups and periodic reconciliation |
-| `--interval <SECONDS>` | Maximum seconds between reconciliation passes; default is `1` |
-| `--interval-ms <MILLISECONDS>` | Maximum milliseconds between reconciliation passes; overrides `--interval` |
+| `--full` | Re-parse every session, ignoring cached stamps |
+| `--json` | Print a machine-readable report with per-source counts (added / updated / unchanged / failed) |
 
-Native filesystem events can trigger an earlier pass. If native watching is unavailable or
-disconnects, export falls back to periodic polling. Stable files are not republished; verified
-append-only growth writes only the new suffix. After a restart or filesystem migration, export
-verifies file content before resuming incremental writes.
+Sync is incremental by default: each source file is compared against the archive by its stat stamp, and only changed files are re-parsed. Failures are per-source and reported, so one broken provider never hides the rest.
 
 Examples:
 
 ```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-sivtr codex export --dest /srv/sivtr/root-codex --limit 100
+sivtr sync
+sivtr sync --full
+sivtr sync --json
 ```
 
 ## clear

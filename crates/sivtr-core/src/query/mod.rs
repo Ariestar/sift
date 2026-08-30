@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 
 use crate::ai::AgentProvider;
 use crate::record::{WorkPath, WorkRecord, WorkRecordIndex, WorkRef, WorkRefSelector};
@@ -68,9 +67,22 @@ pub enum LoadMode {
     Full,
 }
 
-/// Build the record index for a workspace: discover sessions from each
-/// source (terminal, agent providers, …), deduplicate records, and sort
-/// newest-first.
+impl From<LoadMode> for crate::archive::store::BlobMode {
+    fn from(mode: LoadMode) -> Self {
+        match mode {
+            LoadMode::Full => Self::Full,
+            LoadMode::Light => Self::Light,
+        }
+    }
+}
+
+/// Build the record index for a workspace: read every archived session of
+/// the given sources (terminal, agent providers, …), deduplicate records,
+/// and sort newest-first.
+///
+/// The archive is the single read surface: a stamp-gated freshness pass
+/// brings it up to date first, then sessions are listed and decoded from
+/// `archive.db` — native session files are only parsed by the sync engine.
 ///
 /// `recent_sessions` truncates how many recent sessions each source
 /// contributes.
@@ -80,27 +92,48 @@ pub fn load_workspace_records(
     recent_sessions: Option<usize>,
     mode: LoadMode,
 ) -> Result<QueryResult> {
-    let mut tasks: Vec<(&'static str, PathBuf)> = Vec::new();
-    for source in sources {
-        let mut sessions = source.list_sessions(Some(cwd))?;
-        if let Some(limit) = recent_sessions {
-            sessions.truncate(limit);
-        }
-        tasks.extend(
-            sessions
-                .into_iter()
-                .map(|info| (source.namespace(), info.path)),
-        );
-    }
+    let namespaces: Vec<&str> = sources.iter().map(|source| source.namespace()).collect();
+    let conn = crate::archive::open()?;
+    let sync_skipped = crate::archive::sync::ensure_fresh_with_conn(&conn)?;
+    let listed = crate::archive::store::list_workspace_sessions(
+        &conn,
+        &namespaces,
+        Some(cwd),
+        recent_sessions,
+    )?;
 
     let mut result = QueryResult::default();
-    result.records = load_session_files(tasks, mode, &mut result.skipped)?;
+    result.records = decode_archived_sessions(&conn, &listed, mode, &mut result.skipped)?;
+    result.skipped.extend(sync_skipped);
     dedup_records(&mut result.records);
     normalize_session_display_ids(&mut result.records);
     result
         .records
         .sort_by(|a, b| b.time.primary_at().cmp(&a.time.primary_at()));
     Ok(result)
+}
+
+/// Decode one archived session's records per listed row, collecting decode
+/// failures as skips so one corrupt row never hides the corpus.
+fn decode_archived_sessions(
+    conn: &rusqlite::Connection,
+    listed: &[crate::archive::store::ListedSession],
+    mode: LoadMode,
+    skipped: &mut Vec<SkippedSession>,
+) -> Result<Vec<WorkRecord>> {
+    let blob_mode = crate::archive::store::BlobMode::from(mode);
+    let mut records = Vec::new();
+    for session in listed {
+        match crate::archive::store::load_records_by_row(conn, session.row_id, blob_mode) {
+            Ok(session_records) => records.extend(session_records),
+            Err(error) => skipped.push(SkippedSession {
+                namespace: session.provider.clone(),
+                path: PathBuf::from(&session.source_path),
+                error: format!("{error:#}"),
+            }),
+        }
+    }
+    Ok(records)
 }
 
 /// Load one concrete ref or selector from a workspace.
@@ -167,165 +200,32 @@ fn all_agent_providers() -> Vec<AgentProvider> {
         .collect()
 }
 
-/// Load one session file's records from cache (any view) or by parsing the
-/// source file.  A miss writes both views so subsequent light loads skip the
-/// part text.  Public so that CLI consumers (e.g. `WorkSet::materialize_parts`)
-/// can fetch a single session's full records on demand.
+/// Load one session file's records from the archive (either view), or parse
+/// the source file and archive it on a miss. Public so that CLI consumers
+/// (e.g. `WorkSet::materialize_parts`) can fetch a single session's full
+/// records on demand.
 pub fn load_session_records(
     namespace: &str,
     path: &Path,
     mode: LoadMode,
 ) -> Result<Vec<WorkRecord>> {
-    let cache_path = match mode {
-        LoadMode::Light => crate::cache::session_meta_cache_path(namespace, path),
-        LoadMode::Full => crate::cache::session_cache_path(namespace, path),
-    };
-    if let Some(records) = load_cached_view(&cache_path, path) {
+    let conn = crate::archive::open()?;
+    if let Some(records) =
+        crate::archive::store::load_records_by_path(&conn, namespace, path, mode.into())?
+    {
         return Ok(records);
     }
+    // Self-heal: the session is missing or stale in the archive — parse the
+    // source file, archive it for future loads, and serve the fresh records.
     let source = source_by_namespace(namespace)
         .with_context(|| format!("unknown session namespace `{namespace}`"))?;
     let records = source.parse_file(path)?;
-    store_cached_session(namespace, path, &records);
+    crate::archive::sync::store_session_records(namespace, path, &records);
     Ok(records)
-}
-
-/// Load many session files in parallel, through the per-file cache, and
-/// report per-file outcomes in list order.
-fn load_session_files(
-    tasks: Vec<(&'static str, PathBuf)>,
-    mode: LoadMode,
-    skipped: &mut Vec<SkippedSession>,
-) -> Result<Vec<WorkRecord>> {
-    // Session files are independent, so list every parse task up front and
-    // parse them in parallel; outcomes are reassembled in list order so the
-    // record sequence (and downstream dedup) is unchanged. Each task first
-    // checks the per-file stamp cache and only parses when the file changed.
-    let outcomes: Vec<(usize, Result<Vec<WorkRecord>, String>)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = tasks
-            .iter()
-            .enumerate()
-            .map(|(index, (namespace, path))| {
-                let path = path.clone();
-                scope.spawn(move || {
-                    let outcome =
-                        load_session_records(namespace, &path, mode).map_err(|e| format!("{e:#}"));
-                    (index, outcome)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| handle.join().expect("session parse worker panicked"))
-            .collect()
-    });
-
-    let mut records = Vec::new();
-    for (index, outcome) in outcomes {
-        let (namespace, path) = &tasks[index];
-        match outcome {
-            Ok(session_records) => records.extend(session_records),
-            Err(error) => skipped.push(SkippedSession {
-                namespace: (*namespace).to_string(),
-                path: path.clone(),
-                error,
-            }),
-        }
-    }
-    Ok(records)
-}
-
-/// Bump when the cached record layout or agent parsing changes.
-const AGENT_CACHE_VERSION: u32 = 9;
-
-/// On-disk cache entry for one parsed agent session file, keyed by the
-/// session file's (mtime, size). Reading back a stamp-matched blob is an
-/// order of magnitude cheaper than re-parsing the provider transcript.
-///
-/// Records are stored as-is via MessagePack (rmp-serde): it is map-driven, so
-/// it natively serializes [`WorkRecord`] — including the flattened
-/// `WorkPart.data`, the internally-tagged `WorkPartData`, and
-/// `serde_json::Value` tool payloads — with no parallel cache types (bincode
-/// 1/2 reject flattened fields and serde maps).
-#[derive(Serialize, Deserialize)]
-struct CachedAgentSession {
-    version: u32,
-    mtime_secs: u64,
-    mtime_nanos: u32,
-    size: u64,
-    records: Vec<WorkRecord>,
-}
-
-fn load_cached_view(cache_path: &Path, source: &Path) -> Option<Vec<WorkRecord>> {
-    let (secs, nanos, size) = crate::cache::file_stamp(source)?;
-    let bytes = std::fs::read(cache_path).ok()?;
-    let cached: CachedAgentSession = rmp_serde::from_slice(&bytes).ok()?;
-    if cached.version != AGENT_CACHE_VERSION
-        || cached.mtime_secs != secs
-        || cached.mtime_nanos != nanos
-        || cached.size != size
-    {
-        return None;
-    }
-    Some(cached.records)
-}
-
-/// Best-effort cache write; failures never block the search. Writes both
-/// views so later light loads skip the part text: the metadata view is the
-/// same `CachedAgentSession` shape with `parts` emptied (omitted on disk by
-/// `skip_serializing_if`), sharing the version guard and stamp validation.
-fn store_cached_session(namespace: &str, path: &Path, records: &[WorkRecord]) {
-    let Some((secs, nanos, size)) = crate::cache::file_stamp(path) else {
-        return;
-    };
-    store_cached_view(
-        &crate::cache::session_cache_path(namespace, path),
-        records,
-        secs,
-        nanos,
-        size,
-    );
-    store_cached_view(
-        &crate::cache::session_meta_cache_path(namespace, path),
-        &without_parts(records),
-        secs,
-        nanos,
-        size,
-    );
-}
-
-fn store_cached_view(cache_path: &Path, records: &[WorkRecord], secs: u64, nanos: u32, size: u64) {
-    let cache_entry = CachedAgentSession {
-        version: AGENT_CACHE_VERSION,
-        mtime_secs: secs,
-        mtime_nanos: nanos,
-        size,
-        records: records.to_vec(),
-    };
-    // `with_struct_map`: rmp's default struct-as-array encoding breaks
-    // `skip_serializing_if` fields, and the flattened `WorkPart.data` needs map
-    // semantics anyway.
-    let mut serializer = rmp_serde::encode::Serializer::new(Vec::new()).with_struct_map();
-    if cache_entry.serialize(&mut serializer).is_err() {
-        return;
-    }
-    crate::cache::write_cache_atomic(cache_path, &serializer.into_inner());
-}
-
-/// Metadata view of the same records: light fields only, `parts` emptied.
-fn without_parts(records: &[WorkRecord]) -> Vec<WorkRecord> {
-    records
-        .iter()
-        .map(|record| {
-            let mut meta = record.clone();
-            meta.parts.clear();
-            meta
-        })
-        .collect()
 }
 
 /// Serial single-source parse path, kept for tests that drive a mocked
-/// `SessionSource` (the production path parses sessions in parallel).
+/// `SessionSource` (the production path decodes archived sessions).
 #[cfg(test)]
 fn records_from_source(
     source: &dyn SessionSource,
@@ -480,6 +380,7 @@ mod tests {
     };
     use crate::session_source::SessionInfo;
     use anyhow::Result;
+    use serde::Serialize;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 

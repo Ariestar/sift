@@ -3,7 +3,7 @@ title: Configuration
 description: Create, inspect, edit, and understand sivtr configuration.
 ---
 
-`sivtr` uses a TOML config file in the platform config directory. Configuration controls editor handoff, history retention, Codex mirrors, TUI theme, MCP idle exit, and the Windows hotkey chord.
+`sivtr` uses a TOML config file in the platform config directory. Configuration controls editor handoff, history retention, archive sync freshness, TUI theme, MCP idle exit, and the Windows hotkey chord.
 
 ## Commands
 
@@ -29,8 +29,8 @@ command = ""
 auto_save = true
 max_entries = 0
 
-[codex]
-session_dirs = []
+[sync]
+max_age_secs = 15
 
 [hotkey]
 chord = "alt+y"
@@ -54,23 +54,18 @@ max_entries = 0
 
 `max_entries = 0` means unlimited. Set `auto_save = false` when you do not want pipe and run captures written to history automatically.
 
-## Shared Codex session trees
+## Archive sync freshness
 
-Add shared exported Codex session trees when another account publishes a read-only copy:
+Queries read from the unified local archive (`archive.db`). When the archive is older than `[sync].max_age_secs`, a query triggers an incremental re-sync first:
 
 ```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
+[sync]
+# How stale the archive may be (seconds since last sync) before a query
+# triggers an incremental re-sync. 0 = re-list on every query.
+max_age_secs = 15
 ```
 
-Create that shared tree from the source account with:
-
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-```
-
-Only Codex currently has first-class shared mirror configuration. Other registered providers are read from their local provider-specific locations. See [Data Locations](/reference/data-locations/).
+`0` re-lists sources on every query; raise it to trade freshness for latency. Run `sivtr sync` to force a pass. See [Data Locations](/reference/data-locations/).
 
 ## Hotkey chord
 
