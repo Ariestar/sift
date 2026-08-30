@@ -413,6 +413,9 @@ pub enum Commands {
     #[command(after_help = HOTKEY_AFTER_HELP)]
     Hotkey(HotkeyCommand),
 
+    /// Serve the local web UI and JSON API over the unified archive
+    Web(WebArgs),
+
     /// Sync terminal and agent sessions into the unified archive
     Sync(SyncArgs),
 
@@ -1163,6 +1166,17 @@ impl<'de> Deserialize<'de> for HotkeyProviderSelection {
         let value = String::deserialize(deserializer)?;
         Self::from_str(&value).map_err(serde::de::Error::custom)
     }
+}
+
+#[derive(Args, Debug)]
+pub struct WebArgs {
+    /// TCP port to bind
+    #[arg(long, value_name = "PORT", default_value_t = 8080)]
+    pub port: u16,
+
+    /// Bind address; loopback by default so the UI is never exposed
+    #[arg(long, value_name = "HOST", default_value = "127.0.0.1")]
+    pub host: String,
 }
 
 #[derive(Args, Debug)]

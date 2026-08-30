@@ -10,6 +10,7 @@ pub mod origins;
 pub mod output;
 pub mod pane;
 pub mod remote;
+pub mod server;
 pub mod tui;
 
 use anyhow::{Context, Result};
@@ -110,6 +111,9 @@ fn run() -> Result<()> {
         }
         Some(Commands::Hotkey(cmd)) => {
             commands::system::hotkey::execute(cmd)?;
+        }
+        Some(Commands::Web(args)) => {
+            server::execute(&args)?;
         }
         Some(Commands::Sync(args)) => {
             commands::system::sync::execute(&args)?;

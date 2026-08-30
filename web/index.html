@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sivtr</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">sivtr</span>
+    <span class="brand-sub">unified memory</span>
+    <input id="search" type="search" placeholder="Search memory  ( / )" autocomplete="off" spellcheck="false">
+    <select id="source">
+      <option value="all">all</option>
+      <option value="all:agent">agents</option>
+      <option value="all:terminal">terminal</option>
+    </select>
+  </header>
+  <main class="layout">
+    <aside id="sessions-pane" class="pane">
+      <div class="pane-head">
+        <span>Sessions</span>
+        <select id="provider"><option value="">all providers</option></select>
+      </div>
+      <ul id="sessions" class="list"></ul>
+    </aside>
+    <section id="content-pane" class="pane">
+      <div id="results-head" class="pane-head hidden"><span>Search results</span><button id="clear-search">clear</button></div>
+      <ul id="results" class="list hidden"></ul>
+      <div id="detail"></div>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
