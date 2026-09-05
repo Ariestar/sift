@@ -31,6 +31,14 @@ static PATTERNS: LazyLock<Result<Vec<(&'static str, Regex)>, regex::Error>> = La
                 r#"(?i)(api[_-]?key|token|password|secret|bearer)\s*[:=]\s*['"]?[A-Za-z0-9_\-./+=]{12,}['"]?"#,
             )?,
         ),
+        (
+            "jwt",
+            Regex::new(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")?,
+        ),
+        (
+            "cookie",
+            Regex::new(r"(?i)(?:cookie|set-cookie)\s*[:=]\s*[^\r\n]{12,}")?,
+        ),
         ("bearer", Regex::new(r"(?i)bearer\s+[A-Za-z0-9_\-.=]{16,}")?),
         (
             "pem_key",

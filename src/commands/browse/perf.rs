@@ -4,7 +4,7 @@
 
 use crate::pane::{Pane, PaneInput, Viewport};
 use crate::tui::workspace::{WorkspaceDialogue, WorkspaceSession, WorkspaceSource};
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::record::{
     WorkChannel, WorkPart, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
     WorkTime, RECORD_SCHEMA_VERSION,

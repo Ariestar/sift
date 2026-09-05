@@ -19,9 +19,9 @@ use serde_json::json;
 
 use sivtr_core::archive::store::{self, BlobMode};
 use sivtr_core::query::NO_RECORD_FOR_SELECTOR;
-use sivtr_core::search::{Filter, Sort};
+use sivtr_core::search::{Field, Filter, Sort};
 
-use crate::cli::WebArgs;
+use crate::cli::{SearchArgs, WebArgs};
 use crate::commands::memory::workset;
 
 /// Embedded static assets for the UI (`web/` in the repository).
@@ -55,6 +55,8 @@ fn router(port: u16) -> Router {
             get(session_detail),
         )
         .route("/api/v1/search", get(search))
+        .route("/api/v1/usage", get(usage))
+        .route("/api/v1/stats", get(stats))
         .route("/", get(index))
         .fallback(static_asset)
         .layer(middleware::from_fn(move |req, next| {
@@ -155,11 +157,62 @@ struct SearchQuery {
     /// merges the hits.
     source: Option<String>,
     limit: Option<usize>,
+    #[serde(default)]
+    semantic: bool,
+    #[serde(default)]
+    hybrid: bool,
 }
 
 async fn search(AxQuery(query): AxQuery<SearchQuery>) -> Response {
     let limit = query.limit.unwrap_or(50);
     let rank = query.q.clone().unwrap_or_default();
+    if query.semantic || query.hybrid {
+        let Some(query_text) = query.q.clone().filter(|query| !query.trim().is_empty()) else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "semantic and hybrid search require q" })),
+            )
+                .into_response();
+        };
+        let source = query.source.clone().unwrap_or_else(|| "all".to_string());
+        let args = SearchArgs {
+            source,
+            query: Some(query_text),
+            semantic: query.semantic,
+            hybrid: query.hybrid,
+            match_: None,
+            exclude: None,
+            in_field: Field::Content,
+            kind: None,
+            status: None,
+            exit_code: None,
+            min_duration: None,
+            max_duration: None,
+            sort: Some(Sort::Relevance),
+            cwd: None,
+            since: None,
+            until: None,
+            last: None,
+            latest: Some(limit),
+            limit: Some(limit),
+            exclude_current: false,
+            format: None,
+            json: false,
+            refs: false,
+            save: None,
+        };
+        return match crate::commands::memory::semantic::run(&args) {
+            Ok(set) => {
+                let records = set.into_records();
+                Json(json!({ "records": records })).into_response()
+            }
+            Err(error) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("{error:#}") })),
+            )
+                .into_response(),
+        };
+    }
     let sort = if query.q.is_some() {
         Sort::Relevance
     } else {
@@ -206,6 +259,61 @@ async fn search(AxQuery(query): AxQuery<SearchQuery>) -> Response {
     merged.sort_by(|a, b| b.time.primary_at().cmp(&a.time.primary_at()));
     merged.truncate(limit);
     Json(json!({ "records": merged })).into_response()
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    provider: Option<String>,
+    session_id: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+}
+
+async fn usage(AxQuery(query): AxQuery<UsageQuery>) -> Response {
+    let query = sivtr_core::usage::UsageQuery {
+        provider: query.provider,
+        session_id: query.session_id,
+        since: query.since,
+        until: query.until,
+    };
+    if let Err(error) = query.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("{error:#}") })),
+        )
+            .into_response();
+    }
+    with_archive(|conn| {
+        let skipped = sivtr_core::archive::sync::ensure_fresh_with_conn(conn)?;
+        let summary = sivtr_core::usage::summarize(conn, &query)?;
+        Ok(sivtr_core::usage::UsageResult {
+            summary,
+            warnings: sivtr_core::usage::warnings_from_sync(&skipped),
+        })
+    })
+}
+
+async fn stats(AxQuery(query): AxQuery<UsageQuery>) -> Response {
+    let query = sivtr_core::archive::stats::StatsQuery {
+        provider: query.provider,
+        since: query.since,
+        until: query.until,
+    };
+    if let Err(error) = query.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("{error:#}") })),
+        )
+            .into_response();
+    }
+    with_archive(|conn| {
+        let skipped = sivtr_core::archive::sync::ensure_fresh_with_conn(conn)?;
+        let report = sivtr_core::archive::stats::compute(conn, &query)?;
+        Ok(json!({
+            "stats": report,
+            "warnings": sivtr_core::usage::warnings_from_sync(&skipped),
+        }))
+    })
 }
 
 async fn index() -> Response {

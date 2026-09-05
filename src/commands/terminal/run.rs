@@ -1,14 +1,10 @@
-//! Run a command, capture output, save history, open in editor.
+//! Run a command, archive its output, and open it in the editor.
 
 use anyhow::Result;
 use sivtr_core::capture::subprocess;
 use sivtr_core::config::SivtrConfig;
 use sivtr_core::export::editor;
-use sivtr_core::history::CaptureSource;
-
-use super::history;
-
-/// Execute a command, capture its output, optionally save history, open editor.
+/// Execute a command, capture its output, archive it, and open the editor.
 pub fn execute(command: &str, args: &[String]) -> Result<()> {
     let command_line = render_command_line(command, args);
     eprintln!("sivtr: running `{command_line}`");
@@ -26,15 +22,13 @@ pub fn execute(command: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let config = SivtrConfig::load().unwrap_or_default();
-    if let Err(error) = history::maybe_save_default(
-        &config,
-        &result.combined,
+    let config = SivtrConfig::load()?;
+    sivtr_core::archive::store::insert_terminal_capture(
         Some(command_line.as_str()),
-        CaptureSource::Run,
-    ) {
-        eprintln!("sivtr: failed to save history: {error:#}");
-    }
+        &result.combined,
+        &std::env::current_dir()?,
+        result.exit_code,
+    )?;
 
     let ed = editor::resolve_editor_with_config(&config)?;
     eprintln!("sivtr: opening in {ed}");

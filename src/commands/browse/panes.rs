@@ -447,7 +447,7 @@ fn mark_selected_blocks(
 mod tests {
     use super::*;
     use crate::pane::Viewport;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };

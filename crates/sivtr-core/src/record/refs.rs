@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::ai::AgentProvider;
+use crate::agents::AgentProvider;
 
 /// Where a ref lives: current workspace, or a named scope (`docs`, `desk`, `alice/sivtr`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

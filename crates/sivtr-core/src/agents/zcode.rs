@@ -4,9 +4,8 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::agents::{
-    filter_sessions_by_workspace, open_readonly_db, pretty_json_value, push_block,
-    system_time_from_millis, AgentBlockKind, AgentProvider, AgentSession, AgentSessionProvider,
-    SessionInfo,
+    filter_sessions_by_workspace, open_readonly_db, push_block, system_time_from_millis,
+    AgentBlockKind, AgentProvider, AgentSession, AgentSessionProvider, SessionInfo,
 };
 
 const SESSION_PATH_PREFIX: &str = "zcode-session-";
@@ -48,28 +47,32 @@ impl AgentSessionProvider for ZcodeProvider {
     }
 }
 
-pub fn zcode_home() -> PathBuf {
-    if let Ok(path) = std::env::var("ZCODE_HOME") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
+fn zcode_home() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("ZCODE_HOME") {
+        if path.is_empty() {
+            anyhow::bail!("ZCODE_HOME must not be empty");
         }
+        return Ok(PathBuf::from(path));
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".zcode")
+    Ok(dirs::home_dir()
+        .context("failed to determine home directory for ZCode")?
+        .join(".zcode"))
 }
 
-fn zcode_db_path() -> PathBuf {
-    zcode_home().join("cli").join("db").join("db.sqlite")
+fn zcode_db_path() -> Result<PathBuf> {
+    Ok(zcode_home()?.join("cli").join("db").join("db.sqlite"))
 }
 
 /// Drop the constant `sess_` prefix so session refs read `zcode/573eff56/1`.
-fn display_id(row_id: &str) -> &str {
-    row_id.strip_prefix(SESSION_ID_PREFIX).unwrap_or(row_id)
+fn display_id(row_id: &str) -> Result<&str> {
+    row_id
+        .strip_prefix(SESSION_ID_PREFIX)
+        .filter(|id| !id.is_empty())
+        .context("ZCode session id does not use the expected sess_ prefix")
 }
 
 fn list_sessions(cwd: Option<&Path>) -> Result<Vec<SessionInfo>> {
-    let db_path = zcode_db_path();
+    let db_path = zcode_db_path()?;
     if !db_path.exists() {
         return Ok(Vec::new());
     }
@@ -99,7 +102,8 @@ fn list_sessions(cwd: Option<&Path>) -> Result<Vec<SessionInfo>> {
         })?;
         sessions.push(SessionInfo {
             path: session_path(&id),
-            id: Some(display_id(&id).to_string()),
+            physical_path: Some(db_path.clone()),
+            id: Some(display_id(&id)?.to_string()),
             cwd: Some(directory),
             title: Some(title),
             modified: system_time_from_millis(time_updated),
@@ -109,7 +113,8 @@ fn list_sessions(cwd: Option<&Path>) -> Result<Vec<SessionInfo>> {
 }
 
 fn parse_session(row_id: &str) -> Result<AgentSession> {
-    let conn = open_readonly_db(&zcode_db_path())?;
+    let db_path = zcode_db_path()?;
+    let conn = open_readonly_db(&db_path)?;
 
     let header: Option<(String, String)> = conn
         .query_row(
@@ -125,7 +130,7 @@ fn parse_session(row_id: &str) -> Result<AgentSession> {
 
     let mut session = AgentSession {
         path: session_path(row_id),
-        id: Some(display_id(row_id).to_string()),
+        id: Some(display_id(row_id)?.to_string()),
         cwd: Some(directory),
         title: Some(title),
         blocks: Vec::new(),
@@ -155,15 +160,20 @@ fn parse_session(row_id: &str) -> Result<AgentSession> {
             .with_context(|| format!("Invalid ZCode message JSON in session {row_id}"))?;
         let part: Value = serde_json::from_str(&part_json)
             .with_context(|| format!("Invalid ZCode part JSON in session {row_id}"))?;
-        apply_part(&mut session, &message, &part, time_created);
+        apply_part(&mut session, &message, &part, time_created)?;
     }
 
     Ok(session)
 }
 
-fn apply_part(session: &mut AgentSession, message: &Value, part: &Value, time_created: i64) {
+fn apply_part(
+    session: &mut AgentSession,
+    message: &Value,
+    part: &Value,
+    time_created: i64,
+) -> Result<()> {
     if part.get("synthetic").and_then(Value::as_bool) == Some(true) {
-        return;
+        return Ok(());
     }
     let timestamp = Some(time_created.to_string());
 
@@ -172,51 +182,67 @@ fn apply_part(session: &mut AgentSession, message: &Value, part: &Value, time_cr
             let kind = match message.get("role").and_then(Value::as_str) {
                 Some("user") => AgentBlockKind::User,
                 Some("assistant") => AgentBlockKind::Assistant,
-                _ => return,
+                _ => return Ok(()),
             };
-            push_block(
-                session,
-                kind,
-                timestamp,
-                None,
-                part.get("text").and_then(Value::as_str).unwrap_or_default(),
-            );
+            let text = part
+                .get("text")
+                .and_then(Value::as_str)
+                .context("ZCode text part has no string text")?;
+            push_block(session, kind, timestamp, None, text);
         }
-        Some("reasoning") => push_block(
-            session,
-            AgentBlockKind::Thinking,
-            timestamp,
-            None,
-            part.get("text").and_then(Value::as_str).unwrap_or_default(),
-        ),
-        Some("tool") => apply_tool_part(session, part, timestamp),
+        Some("reasoning") => {
+            let text = part
+                .get("text")
+                .and_then(Value::as_str)
+                .context("ZCode reasoning part has no string text")?;
+            push_block(session, AgentBlockKind::Thinking, timestamp, None, text);
+        }
+        Some("tool") => apply_tool_part(session, part, timestamp)?,
         // step-start / step-finish are turn markers, not dialogue.
         _ => {}
     }
+    Ok(())
 }
 
-fn apply_tool_part(session: &mut AgentSession, part: &Value, timestamp: Option<String>) {
+fn apply_tool_part(
+    session: &mut AgentSession,
+    part: &Value,
+    timestamp: Option<String>,
+) -> Result<()> {
     let label = part.get("tool").and_then(Value::as_str).map(str::to_string);
-    let state = part.get("state").unwrap_or(&Value::Null);
+    let state = part
+        .get("state")
+        .and_then(Value::as_object)
+        .context("ZCode tool part has no state object")?;
+    let input = state
+        .get("input")
+        .and_then(Value::as_object)
+        .context("ZCode tool part has no input object")?;
 
-    if let Some(input) = state.get("input") {
+    push_block(
+        session,
+        AgentBlockKind::ToolCall,
+        timestamp.clone(),
+        label.clone(),
+        serde_json::to_string_pretty(input).context("failed to format ZCode tool input")?,
+    );
+    if let Some(output) = state.get("output") {
+        let text = output
+            .as_str()
+            .context("ZCode tool output is not a string")?;
         push_block(
             session,
-            AgentBlockKind::ToolCall,
+            AgentBlockKind::ToolOutput,
             timestamp.clone(),
             label.clone(),
-            pretty_json_value(input),
+            text,
         );
     }
-    if let Some(output) = state.get("output").or_else(|| state.get("error")) {
-        // Structured tool results (objects/arrays) are rendered as JSON so
-        // they stay in the transcript instead of being dropped by as_str.
-        let text = match output.as_str() {
-            Some(text) => text.to_string(),
-            None => pretty_json_value(output),
-        };
+    if let Some(error) = state.get("error") {
+        let text = error.as_str().context("ZCode tool error is not a string")?;
         push_block(session, AgentBlockKind::ToolOutput, timestamp, label, text);
     }
+    Ok(())
 }
 
 fn session_path(row_id: &str) -> PathBuf {
@@ -351,6 +377,8 @@ mod tests {
         assert_eq!(session.blocks[3].text, "{\n  \"command\": \"ls\"\n}");
         assert_eq!(session.blocks[4].text, "files");
         assert_eq!(session.blocks[6].text, "too large");
+        let records = crate::record::WorkRecord::chat_turns(AgentProvider::Zcode, &session);
+        assert_eq!(records[0].work_ref.to_string(), "zcode/uuid-1/1");
 
         match original {
             Some(value) => std::env::set_var("ZCODE_HOME", value),

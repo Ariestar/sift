@@ -88,6 +88,7 @@ fn list_recent_sessions_in(root: &Path, cwd: Option<&Path>) -> Result<Vec<Sessio
                         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                     sessions.push(SessionInfo {
                         path,
+                        physical_path: None,
                         id: meta.id,
                         cwd: meta.cwd,
                         title: meta.title,

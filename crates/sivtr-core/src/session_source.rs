@@ -20,7 +20,12 @@ use crate::{session, workspace};
 /// address records without parsing the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// Logical source path passed to the provider parser. Container providers
+    /// use a virtual path so one physical database can expose many sessions.
     pub path: PathBuf,
+    /// Physical file or directory used for freshness stamping. `None` means
+    /// `path` itself is the physical source.
+    pub physical_path: Option<PathBuf>,
     pub id: Option<String>,
     pub cwd: Option<String>,
     pub title: Option<String>,
@@ -65,6 +70,7 @@ impl SessionSource for TerminalSource {
                 .with_context(|| format!("Failed to stamp terminal log {}", path.display()))?;
             infos.push(SessionInfo {
                 path,
+                physical_path: None,
                 id: None,
                 cwd: None,
                 title: None,

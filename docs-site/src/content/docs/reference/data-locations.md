@@ -1,6 +1,6 @@
 ---
 title: Data Locations
-description: Where sivtr stores configuration, history, session logs, and provider data.
+description: Where sivtr stores configuration, the unified archive, session logs, and provider data.
 ---
 
 `sivtr` is local-first. Most data it uses is already on your machine, and generated data is written under platform config or state directories unless you explicitly export it elsewhere.
@@ -25,31 +25,10 @@ Shell integration writes per-process structured session logs.
 
 These logs power:
 
-- `sivtr import`;
+- the `sivtr` workspace browser;
 - `sivtr copy` command-block workflows;
 - `sivtr diff`;
 - command-block navigation in the browser.
-
-## History database
-
-Captured terminal output is stored in a local SQLite history database when `[history].auto_save = true`.
-
-Use CLI commands instead of editing the database directly:
-
-```bash
-sivtr history list
-sivtr history search "panic"
-sivtr history show 42
-```
-
-Retention is controlled by:
-
-```toml
-[history]
-max_entries = 0
-```
-
-`0` means unlimited.
 
 ## Agent provider data
 
@@ -78,7 +57,7 @@ Search, show, copy, picker, TUI, and MCP queries read from a unified local archi
 | macOS | `~/Library/Application Support/sivtr/archive.db` |
 | Linux | `~/.config/sivtr/archive.db` |
 
-It is a SQLite database (WAL mode) written by the sync engine: `sivtr sync` runs a pass explicitly, and queries run an automatic freshness pass when the archive is older than `[sync].max_age_secs`. Native agent session files and shell session logs remain the source of truth and are only read by the sync engine. Override the root with `SIVTR_DATA_DIR`.
+It is a SQLite database (WAL mode) written by the sync engine: `sivtr sync` runs a pass explicitly, queries run an automatic freshness pass when the archive is older than `[sync].max_age_secs`, and `pipe`/`run` write one-shot terminal captures directly to it. Native agent session files and shell session logs remain the source of truth and are only read by the sync engine. Override the root with `SIVTR_DATA_DIR`.
 
 ## Generated launchers
 

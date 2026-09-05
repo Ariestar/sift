@@ -3,7 +3,7 @@ title: Configuration
 description: Create, inspect, edit, and understand sivtr configuration.
 ---
 
-`sivtr` uses a TOML config file in the platform config directory. Configuration controls editor handoff, history retention, archive sync freshness, TUI theme, MCP idle exit, and the Windows hotkey chord.
+`sivtr` uses a TOML config file in the platform config directory. Configuration controls editor handoff, archive sync freshness, TUI theme, MCP idle exit, and the Windows hotkey chord.
 
 ## Commands
 
@@ -25,10 +25,6 @@ sivtr config edit
 [editor]
 command = ""
 
-[history]
-auto_save = true
-max_entries = 0
-
 [sync]
 max_age_secs = 15
 
@@ -43,16 +39,6 @@ idle_exit_secs = 60
 ```
 
 For a field-by-field reference, see [Config File](/reference/config-file/).
-
-## History retention
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-`max_entries = 0` means unlimited. Set `auto_save = false` when you do not want pipe and run captures written to history automatically.
 
 ## Archive sync freshness
 

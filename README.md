@@ -53,11 +53,16 @@
 
 ## 特性
 
-- **MCP 优先的 Agent 记忆**：一次 `sivtr mcp install`，Agent 直接调用 `sivtr_search` / `sivtr_show` / `sivtr_zoom` / `sivtr_filter` / `sivtr_status`，不用你粘贴日志。
-- **带输出的 shell history**：记录 Bash、Zsh、PowerShell、Nushell 里的命令、stdout/stderr、退出码、目录和耗时。
-- **一个搜索面覆盖本地工作**：终端输出 + 所有已注册 Agent provider（Codex / Claude Code / Cursor / Dsh / Gemini / Goose / Hermes / OpenCode / OpenClaw / Grok / Pi / Qoder / Qoder-CN / Qwen …）——MCP 或 CLI 都能用。
+- **MCP 优先的 Agent 记忆**：一次 `sivtr mcp install`，Agent 直接调用 search/show/zoom/filter/status/usage/stats 工具，不用你粘贴日志。
+- **保留输出的终端捕获**：记录 Bash、Zsh、PowerShell、Nushell 里的命令、stdout/stderr、退出码、目录和耗时；`pipe` 和 `run` 直接写入同一个 archive。
+- **统一本地 archive**：所有终端和 Agent session 先同步到一个 `archive.db`；provider 只负责发现和解析，搜索、筛选、导出、TUI、MCP、Web API 共用同一份记录模型。
+- **40+ Agent provider**：Codex / Claude Code / Cursor / Dsh / Gemini / Goose / Hermes / OpenCode / OpenClaw / Grok / Pi / Qoder / Qoder-CN / Qwen，以及更多 JSONL、SQLite、目录和容器格式——同一个 registry 和查询面。
 - **精确证据，而不是摘要**：每个命中都落到稳定 ref，可 show / zoom / filter，或交给下一个 Agent。
 - **命名记忆变量**：把结果保存成 `@failures`，复用 `@last`，管道用 `@`，也可 `@failures[1,3..5]` 取子集。
+- **用量与成本**：从 transcript 提取 token usage，用精确微美元整数和内置 pricing snapshot 计算成本；未知价格明确显示为 unpriced，不猜价格。
+- **可选 semantic / hybrid search**：配置一个 OpenAI-compatible embedding endpoint 后，用向量排序或 RRF 融合 BM25；不配置时结构化搜索仍完整可用。
+- **统计、质量和可移植导入导出**：`stats`、secret findings、starred sessions、Claude.ai/ChatGPT JSON/ZIP 导入，以及 JSON/JSONL/Markdown/HTML 导出。
+- **本地 Web UI**：`sivtr web` 提供 loopback dashboard 和 JSON API，直接读取同一 unified archive。
 - **跨设备访问**：只读分享 workspace，用 `desk:...` ref 像读本地一样浏览另一台设备；多设备还能组成 `group`，成员间自动同步、一次 `sync` 拉齐。
 - **主题可配**：`[theme] mode = auto|dark|light`，自动跟随系统外观并检测 truecolor。
 - **一键安装与诊断**：`sivtr setup` 装 hooks + MCP；`sivtr doctor --fix` 自动修复。
@@ -103,6 +108,15 @@ npx skills add Ariestar/sivtr --skill sivtr-memory -g -y
 sivtr doctor
 ```
 
+同步并查看 archive：
+
+```bash
+sivtr sync
+sivtr usage daily
+sivtr stats
+sivtr web
+```
+
 > [!NOTE]
 > 在 Windows 上，如果 `sivtr init powershell` 提示 profile 没有加载，执行一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` 把当前用户的执行策略调高即可。sivtr 不会修改注册表——hook 只写在你的 PowerShell profile 里。
 
@@ -117,6 +131,8 @@ sivtr doctor
 | `sivtr_zoom` | 展开前后上下文 |
 | `sivtr_filter` | 缩小结果集 |
 | `sivtr_status` | workspace / remote / origin 状态 |
+| `sivtr_usage` | token 用量与模型成本 |
+| `sivtr_stats` | archive 活动、质量与用量统计 |
 
 可选 skill（教 Agent 何时调用这些工具）：
 
@@ -197,6 +213,10 @@ sivtr copy out 2..4                      # 第 2~4 块的输出
 sivtr copy in --pick --regex panic       # 交互挑选含 panic 的输入块
 sivtr copy cmd --pick                    # 交互挑选命令本身
 sivtr copy 3 --print                     # 第 3 块直接打印到 stdout
+sivtr usage daily --breakdown             # 按天/provider/model 查看 token 与成本
+sivtr usage session codex/<session-id>    # 查看单个 session 的用量
+sivtr export sessions --format markdown   # 导出 archive 中的 session
+sivtr import sessions --provider chatgpt conversations.json
 ```
 
 **远程与协同**
@@ -285,6 +305,8 @@ sivtr s <peer>:terminal --status failure --latest 5 --refs
 | Pi | 本地 Pi agent session logs。 |
 | Qoder / Qoder-CN | 本地 Qoder 与 Qoder-CN agent sessions。 |
 | Qwen | 本地 Qwen Code sessions。 |
+| 更多 provider | Amp、Aider、Antigravity、Copilot、Forge、gptme、iFlow、Kimi、Kiro、OpenHands、Poolside、RooCode、Trae、Vibe、VSCode Copilot、Windsurf、Zed、Zencoder 等。 |
+| Web 导入 | Claude.ai 与 ChatGPT 的 JSON/ZIP 导出，经 `sivtr import sessions` 写入 archive。 |
 
 ## 文档
 
@@ -315,7 +337,7 @@ bun run build
 仓库结构：
 
 ```text
-crates/sivtr-core/  core model、provider parsers、search、history、config
+crates/sivtr-core/  core model、provider parsers、archive、usage、search、config
 src/                CLI commands、TUI、shell hooks、hotkey integration
 docs-site/          Astro/Starlight documentation site
 editors/vscode/     AI session picker 的 VS Code bridge

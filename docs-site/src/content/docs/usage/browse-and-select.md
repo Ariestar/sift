@@ -3,7 +3,7 @@ title: Browse and Select
 description: Navigate the workspace browser, fold structure blocks, select, and copy.
 ---
 
-The **workspace browser** (bare `sivtr` on a TTY, or `sivtr copy --pick` / hotkey) is the interactive surface: multi-source Source → Sessions → Dialogues → Content. `sivtr pipe` and `sivtr run` no longer open a TUI — they write to history and open the external editor.
+The **workspace browser** (bare `sivtr` on a TTY, or `sivtr copy --pick` / hotkey) is the interactive surface: multi-source Source → Sessions → Dialogues → Content. `sivtr pipe` and `sivtr run` no longer open a TUI — they write to the unified archive and open the external editor.
 
 ## Open the workspace browser
 

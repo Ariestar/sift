@@ -1,6 +1,6 @@
 ---
 title: Mental Model
-description: Understand how sivtr unifies terminal history and agent conversations into searchable shared memory.
+description: Understand how sivtr unifies terminal captures and agent conversations into searchable shared memory.
 ---
 
 > Unify terminal records and agent conversations into one local, searchable, referenceable shared memory workspace.
@@ -56,7 +56,7 @@ A session is one continuous record from a source.
 
 - Terminal session: a group of recent command blocks.
 - Agent session: one local conversation from an agent provider.
-- Pipe / run session: one temporary captured output.
+- Pipe / run session: one captured output archived as a terminal session.
 
 Session is mainly a navigation concept: which terminal run? which agent conversation? which captured output?
 
@@ -188,7 +188,7 @@ sivtr nav @hit '~' --refs          # containing session records
 
 ## Commands
 
-Shared workspace memory can be opened, searched, copied, expanded, compared, or temporarily captured with these commands:
+Shared workspace memory can be opened, searched, copied, expanded, compared, or captured with these commands:
 
 | Command | Purpose |
 | --- | --- |

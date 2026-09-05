@@ -45,7 +45,7 @@ pub fn session_meta(record: &WorkRecord) -> WorkJsonSessionMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkPart, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };

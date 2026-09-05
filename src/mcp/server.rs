@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::commands::memory::{filter, search, show, workset, zoom};
+use crate::remote::ipc;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::*,
@@ -11,15 +13,11 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
 };
 use serde::Serialize;
-use sivtr_core::ai::AgentProvider;
-
-use crate::commands::memory::{filter, search, show, workset, zoom};
-use crate::remote::ipc;
 
 use super::types::{
     memory_result, show_result, to_filter_args, to_search_args, to_show_args, to_zoom_args,
-    FilterParams, ProviderStatus, SearchParams, ShowParams, StatusParams, StatusResult, VarStatus,
-    ZoomParams,
+    FilterParams, ProviderStatus, SearchParams, ShowParams, StatsParams, StatusParams,
+    StatusResult, UsageParams, VarStatus, ZoomParams,
 };
 
 #[derive(Clone)]
@@ -105,6 +103,53 @@ impl SivtrMcp {
     ) -> Result<CallToolResult, McpError> {
         let result = collect_status(params.cwd.as_deref()).map_err(tool_error)?;
         ok_json(result)
+    }
+
+    #[tool(
+        description = "Read token usage and exact model costs from the unified archive. Supports optional provider, session_id, and inclusive UTC day bounds; unknown model prices are reported as unpriced instead of guessed."
+    )]
+    fn sivtr_usage(
+        &self,
+        Parameters(params): Parameters<UsageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let query = sivtr_core::usage::UsageQuery {
+            provider: params.provider,
+            session_id: params.session_id,
+            since: params.since,
+            until: params.until,
+        };
+        query.validate().map_err(invalid_params)?;
+        let conn = sivtr_core::archive::open().map_err(tool_error)?;
+        let skipped =
+            sivtr_core::archive::sync::ensure_fresh_with_conn(&conn).map_err(tool_error)?;
+        let summary = sivtr_core::usage::summarize(&conn, &query).map_err(tool_error)?;
+        ok_json(sivtr_core::usage::UsageResult {
+            summary,
+            warnings: sivtr_core::usage::warnings_from_sync(&skipped),
+        })
+    }
+
+    #[tool(
+        description = "Read activity, outcome, project, privacy, and token-cost statistics from the unified archive."
+    )]
+    fn sivtr_stats(
+        &self,
+        Parameters(params): Parameters<StatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let query = sivtr_core::archive::stats::StatsQuery {
+            provider: params.provider,
+            since: params.since,
+            until: params.until,
+        };
+        query.validate().map_err(invalid_params)?;
+        let conn = sivtr_core::archive::open().map_err(tool_error)?;
+        let skipped =
+            sivtr_core::archive::sync::ensure_fresh_with_conn(&conn).map_err(tool_error)?;
+        let report = sivtr_core::archive::stats::compute(&conn, &query).map_err(tool_error)?;
+        ok_json(serde_json::json!({
+            "stats": report,
+            "warnings": sivtr_core::usage::warnings_from_sync(&skipped),
+        }))
     }
 }
 
@@ -240,18 +285,17 @@ fn collect_status(cwd: Option<&str>) -> anyhow::Result<StatusResult> {
     let session_dir_present = session_dir.as_ref().is_some_and(|path| path.exists());
 
     let shell_hooks_installed = shell_hooks_installed();
-    let providers = provider_status();
+    let providers = provider_status()?;
     let (daemon_running, daemon_node_id) = daemon_status();
     let origins = crate::origins::collect(&cwd)?.all().cloned().collect();
-    let vars = workset::list_saved().ok().map(|list| {
-        list.into_iter()
-            .map(|var| VarStatus {
-                name: var.name,
-                items: var.items,
-                created_at: var.created_at,
-            })
-            .collect()
-    });
+    let vars = workset::list_saved()?
+        .into_iter()
+        .map(|var| VarStatus {
+            name: var.name,
+            items: var.items,
+            created_at: var.created_at,
+        })
+        .collect();
 
     Ok(StatusResult {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -314,25 +358,15 @@ fn shell_hooks_installed() -> bool {
     false
 }
 
-fn provider_status() -> Vec<ProviderStatus> {
-    AgentProvider::all()
-        .iter()
-        .map(|spec| {
-            let provider = spec.provider.session_provider();
-            match provider.list_recent_sessions(None) {
-                Ok(sessions) => ProviderStatus {
-                    name: spec.provider.name().to_string(),
-                    sessions: Some(sessions.len()),
-                    error: None,
-                },
-                Err(error) => ProviderStatus {
-                    name: spec.provider.name().to_string(),
-                    sessions: None,
-                    error: Some(error.to_string()),
-                },
-            }
+fn provider_status() -> anyhow::Result<Vec<ProviderStatus>> {
+    Ok(sivtr_core::archive::sync::provider_status()?
+        .into_iter()
+        .map(|status| ProviderStatus {
+            name: status.name,
+            sessions: status.error.is_none().then_some(status.sessions),
+            error: status.error,
         })
-        .collect()
+        .collect())
 }
 
 fn daemon_status() -> (bool, Option<String>) {

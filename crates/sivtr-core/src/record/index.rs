@@ -43,7 +43,7 @@ fn find_part(record: &WorkRecord, seq: usize) -> Option<&super::model::WorkPart>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::AgentProvider;
+    use crate::agents::AgentProvider;
     use crate::record::model::{WorkPart, WorkPartData, WorkRecordKind, WorkTime};
 
     #[test]

@@ -2,7 +2,7 @@
 
 use ratatui::prelude::Color;
 use ratatui::widgets::ListState;
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::record::{WorkAt, WorkRecord, WorkRef, WorkScope};
 use std::collections::HashSet;
 use std::time::SystemTime;
@@ -41,24 +41,25 @@ impl WorkspaceSourceKind {
         }
     }
 
-    pub(crate) fn badge(self) -> &'static str {
+    pub(crate) fn badge(self) -> String {
         match self {
-            Self::Terminal => "term",
-            Self::Agent(AgentProvider::Codex) => "cdx",
-            Self::Agent(AgentProvider::Claude) => "cld",
-            Self::Agent(AgentProvider::Cursor) => "cur",
-            Self::Agent(AgentProvider::Dsh) => "dsh",
-            Self::Agent(AgentProvider::OpenCode) => "opc",
-            Self::Agent(AgentProvider::OpenClaw) => "ocw",
-            Self::Agent(AgentProvider::Hermes) => "hrm",
-            Self::Agent(AgentProvider::Grok) => "grk",
-            Self::Agent(AgentProvider::Pi) => "pi",
-            Self::Agent(AgentProvider::Qoder) => "qdr",
-            Self::Agent(AgentProvider::QoderCn) => "qcn",
-            Self::Agent(AgentProvider::Gemini) => "gmi",
-            Self::Agent(AgentProvider::Goose) => "gse",
-            Self::Agent(AgentProvider::Qwen) => "qwn",
-            Self::Agent(AgentProvider::Zcode) => "zcd",
+            Self::Terminal => "term".to_string(),
+            Self::Agent(AgentProvider::Codex) => "cdx".to_string(),
+            Self::Agent(AgentProvider::Claude) => "cld".to_string(),
+            Self::Agent(AgentProvider::Cursor) => "cur".to_string(),
+            Self::Agent(AgentProvider::Dsh) => "dsh".to_string(),
+            Self::Agent(AgentProvider::OpenCode) => "opc".to_string(),
+            Self::Agent(AgentProvider::OpenClaw) => "ocw".to_string(),
+            Self::Agent(AgentProvider::Hermes) => "hrm".to_string(),
+            Self::Agent(AgentProvider::Grok) => "grk".to_string(),
+            Self::Agent(AgentProvider::Pi) => "pi".to_string(),
+            Self::Agent(AgentProvider::Qoder) => "qdr".to_string(),
+            Self::Agent(AgentProvider::QoderCn) => "qcn".to_string(),
+            Self::Agent(AgentProvider::Gemini) => "gmi".to_string(),
+            Self::Agent(AgentProvider::Goose) => "gse".to_string(),
+            Self::Agent(AgentProvider::Qwen) => "qwn".to_string(),
+            Self::Agent(AgentProvider::Zcode) => "zcd".to_string(),
+            Self::Agent(provider) => provider.command_name().chars().take(3).collect(),
         }
     }
 
@@ -124,7 +125,7 @@ impl WorkspaceSource {
         }
     }
 
-    pub(crate) fn badge(&self) -> &'static str {
+    pub(crate) fn badge(&self) -> String {
         self.kind.badge()
     }
 

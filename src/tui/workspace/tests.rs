@@ -11,7 +11,7 @@ use crate::tui::content::io::ExpandedBlocks;
 use crate::tui::content::text::{workspace_content_io_texts, workspace_content_text};
 use crate::tui::content::view::ContentViewMode;
 use crate::tui::search::WorkspaceSearchScope;
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::record::{WorkAt, WorkRecord, WorkRef};
 
 fn tool_test_value(text: String) -> serde_json::Value {

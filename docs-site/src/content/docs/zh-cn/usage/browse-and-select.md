@@ -3,7 +3,7 @@ title: 浏览和选择
 description: 导航 workspace 浏览器、折叠结构块、选择并复制。
 ---
 
-**workspace 浏览器**（TTY 下裸 `sivtr`，或 `sivtr copy --pick` / 热键）是交互界面：多源 Source → Sessions → Dialogues → Content。`sivtr pipe` 和 `sivtr run` 不再打开 TUI——它们写入历史并用外部编辑器打开。
+**workspace 浏览器**（TTY 下裸 `sivtr`，或 `sivtr copy --pick` / 热键）是交互界面：多源 Source → Sessions → Dialogues → Content。`sivtr pipe` 和 `sivtr run` 不再打开 TUI——它们写入统一 archive 并用外部编辑器打开。
 
 ## 打开 workspace 浏览器
 

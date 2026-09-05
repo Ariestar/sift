@@ -17,7 +17,7 @@ description: 打开统一 workspace TUI，浏览终端命令和所有 Agent 会�
 
 之后你就可以要求 Agent “先用 sivtr 查”，它会有明确流程去搜索本地记忆。
 
-## 2. 先让终端记录进入 workspace
+## 2. 先让终端工作进入 workspace
 
 如果是第一次使用，先安装一次 shell 集成：
 

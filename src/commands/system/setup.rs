@@ -115,13 +115,14 @@ fn pick_shells() -> Result<Vec<String>> {
 
 fn pick_mcp_targets() -> Result<Vec<String>> {
     let detected = crate::commands::system::mcp::detect_targets();
-    let all: Vec<String> = sivtr_core::ai::AgentProvider::all()
+    let managed = crate::commands::system::mcp::managed_targets().collect::<Vec<_>>();
+    let all: Vec<String> = managed
         .iter()
-        .map(|spec| spec.name.to_string())
+        .map(|provider| provider.name().to_string())
         .collect();
     let defaults: Vec<usize> = detected
         .iter()
-        .filter_map(|p| all.iter().position(|name| name == p.name()))
+        .filter_map(|provider| managed.iter().position(|candidate| candidate == provider))
         .collect();
 
     let selected =
@@ -133,11 +134,7 @@ fn pick_mcp_targets() -> Result<Vec<String>> {
 
     let targets: Vec<String> = selected
         .iter()
-        .filter_map(|&i| {
-            sivtr_core::ai::AgentProvider::all()
-                .get(i)
-                .map(|spec| spec.provider.command_name().to_string())
-        })
+        .map(|&i| managed[i].command_name().to_string())
         .collect();
     Ok(targets)
 }
@@ -169,7 +166,7 @@ fn run_step(msg: &str, action: impl FnOnce() -> Result<String>) -> Result<()> {
 
 fn smoke_test() -> Result<String> {
     let has_terminal = workspace::resolve_current_workspace()?.is_some();
-    let providers: Vec<&str> = sivtr_core::ai::AgentProvider::all()
+    let providers: Vec<&str> = sivtr_core::agents::AgentProvider::all()
         .iter()
         .map(|spec| spec.provider.name())
         .collect();

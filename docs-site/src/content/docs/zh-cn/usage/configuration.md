@@ -3,7 +3,7 @@ title: 配置
 description: 创建、查看、编辑并理解 sivtr 配置。
 ---
 
-`sivtr` 使用平台配置目录中的 TOML 配置文件。配置控制编辑器交接、history 保留、archive 同步新鲜度、TUI 主题、MCP idle 退出和 Windows 热键按键。
+`sivtr` 使用平台配置目录中的 TOML 配置文件。配置控制编辑器交接、archive 同步新鲜度、TUI 主题、MCP idle 退出和 Windows 热键按键。
 
 ## 命令
 
@@ -25,10 +25,6 @@ sivtr config edit
 [editor]
 command = ""
 
-[history]
-auto_save = true
-max_entries = 0
-
 [sync]
 max_age_secs = 15
 
@@ -48,16 +44,6 @@ endpoint = "https://share.hnnulwh.cn"
 `[publish].endpoint` 是加密公开链接服务地址。当前正式入口使用 `https://share.hnnulwh.cn`，由 Nginx 反向代理到同一台服务器上仅监听 loopback 的 Sivtr publication 服务；staging 或其他托管方式可以改为兼容同一 `/api/v1` 契约的 endpoint。该配置不会增加第二套认证路径。
 
 字段级说明见[配置文件](/zh-cn/reference/config-file/)。
-
-## History 保留
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-`max_entries = 0` 表示无限制。如果不希望 pipe 和 run capture 自动写入 history，设置 `auto_save = false`。
 
 ## Archive 同步新鲜度
 

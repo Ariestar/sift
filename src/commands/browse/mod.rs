@@ -26,7 +26,7 @@ pub(crate) use picker::run as run_picker;
 pub(crate) use text::{filter_lines_by_spec, record_text_to_pair, select_lines};
 
 use anyhow::{anyhow, Context, Result};
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::publication::{PublicationDraft, PublicationExpiry};
 use sivtr_core::workset::WorkSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};

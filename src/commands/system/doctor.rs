@@ -419,38 +419,41 @@ impl Report {
     }
 
     fn check_providers(&mut self) {
-        let mut detail = String::new();
-        let mut errors = 0usize;
-        for spec in sivtr_core::ai::AgentProvider::all() {
-            let provider = spec.provider.session_provider();
-            match provider.list_recent_sessions(None) {
-                Ok(s) if s.is_empty() => {
-                    detail.push_str(&format!("{}: 0  ", spec.provider.name()));
-                }
-                Ok(s) => {
-                    detail.push_str(&format!("{}: {}  ", spec.provider.name(), s.len()));
-                }
-                Err(_) => {
-                    errors += 1;
-                    detail.push_str(&format!("{}: error  ", spec.provider.name()));
-                }
+        match sivtr_core::archive::sync::provider_status() {
+            Ok(statuses) => {
+                let errors = statuses
+                    .iter()
+                    .filter(|status| status.error.is_some())
+                    .count();
+                let detail = statuses
+                    .iter()
+                    .map(|status| match &status.error {
+                        Some(error) => format!("{}: error ({error})", status.name),
+                        None => format!("{}: {}", status.name, status.sessions),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  ");
+                self.add(Check {
+                    name: "providers",
+                    label: "provider sessions",
+                    status: if errors == 0 {
+                        Status::Pass
+                    } else {
+                        Status::Manual
+                    },
+                    detail,
+                    hint: (errors > 0)
+                        .then(|| "one or more providers failed during archive sync".to_string()),
+                });
             }
+            Err(error) => self.add(Check {
+                name: "providers",
+                label: "provider sessions",
+                status: Status::Manual,
+                detail: format!("archive status failed: {error:#}"),
+                hint: Some("run `sivtr sync --full` and inspect the report".to_string()),
+            }),
         }
-        self.add(Check {
-            name: "providers",
-            label: "provider sessions",
-            status: if errors == 0 {
-                Status::Pass
-            } else {
-                Status::Manual
-            },
-            detail: detail.trim().to_string(),
-            hint: if errors == 0 {
-                None
-            } else {
-                Some("one or more providers failed to list sessions".to_string())
-            },
-        });
     }
 
     fn check_clipboard(&mut self) {

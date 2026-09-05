@@ -176,7 +176,7 @@ cargo install --path . --force
 
 ## Shell integration
 
-Shell integration records recent command blocks so `sivtr copy`, `sivtr import`, and command-block navigation have structured data to work with.
+Shell integration records recent command blocks so `sivtr copy` and command-block navigation have structured data to work with.
 
 Install the hook for your shell:
 

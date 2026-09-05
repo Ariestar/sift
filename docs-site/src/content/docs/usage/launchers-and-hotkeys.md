@@ -117,9 +117,8 @@ This writes:
 - `~/.local/bin/sivtr-pick-codex`
 - `~/.local/share/applications/sivtr-pick-codex.desktop`
 
-The historical filename stays the same for compatibility, but the generated
-script now opens the provider-neutral AI session picker with the exact `sivtr`
-binary that created it.
+The generated script opens the provider-neutral AI session picker with the
+exact `sivtr` binary that created it.
 
 Bind your desktop shortcut to the generated script, or run it directly from a terminal.
 
@@ -136,9 +135,8 @@ This writes:
 - `~/.local/bin/sivtr-pick-codex`
 - `~/Library/LaunchAgents/dev.sivtr.pick-codex.plist`
 
-The historical filename stays the same for compatibility, but the generated
-script now opens the provider-neutral AI session picker with the exact `sivtr`
-binary that created it.
+The generated script opens the provider-neutral AI session picker with the
+exact `sivtr` binary that created it.
 
 Run the script directly, or load the LaunchAgent:
 

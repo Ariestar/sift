@@ -13,7 +13,7 @@ pub use export::export_picked;
 pub use plan::{parse_address_dialogues, CopyFilters, CopyPlan, Projection};
 
 use anyhow::{Context, Result};
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::origin::Reach;
 use sivtr_core::record::WorkRecord;
 

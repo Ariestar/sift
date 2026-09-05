@@ -3,15 +3,14 @@ title: Local-first 与隐私
 description: sivtr 如何让 Agent memory、终端输出和 transcript 保持在本地用户控制之下。
 ---
 
-`sivtr` 围绕本地 Agent memory 设计。终端输出、shell session log、history 和 Agent transcript 可能包含密钥、私有代码、凭据、内部 URL 和未完成推理。默认姿态是让这些数据留在原本产生它们的机器上。
+`sivtr` 围绕本地 Agent memory 设计。终端输出、shell session log 和 Agent transcript 可能包含密钥、私有代码、凭据、内部 URL 和未完成推理。默认姿态是让这些数据留在原本产生它们的机器上。
 
 ## 默认本地
 
 `sivtr` 读写本地文件和数据库：
 
 - shell 集成产生的 shell session log；
-- 捕获终端输出的本地 SQLite history；
-- 统一 session archive（`archive.db`）；
+- 统一 session archive（`archive.db`），包括一次性 terminal capture；
 - provider 自己的 Agent transcript 文件或数据库；
 - 平台配置目录下的本地配置。
 
@@ -19,7 +18,7 @@ description: sivtr 如何让 Agent memory、终端输出和 transcript 保持在
 
 ## 本地 archive
 
-终端捕获和 Agent session 会同步进一个本地 SQLite archive（`archive.db`），位于 sivtr 的 data 目录下。这个过程中没有任何数据离开本机：原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
+终端捕获和 Agent session 位于一个本地 SQLite archive（`archive.db`），位于 sivtr 的 data 目录下。这个过程中没有任何数据离开本机：原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
 
 ## 显式远程分享
 
@@ -53,18 +52,6 @@ sivtr copy claude out
 ```
 
 请把剪贴板内容视为会被桌面环境和剪贴板管理器共享。敏感场景下可用 `--print` 先检查文本。
-
-## History 保留可配置
-
-启用时，捕获的终端输出会保存到 history：
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-如果不希望 capture 自动写入，设置 `auto_save = false`。把 `max_entries` 设为正数可以限制保留数量。
 
 ## 良好操作习惯
 

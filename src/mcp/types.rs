@@ -22,6 +22,12 @@ pub struct SearchParams {
     /// With match_regex present, the regex bounds the set and this query ranks it.
     #[serde(default)]
     pub query: Option<String>,
+    /// Use configured embeddings for semantic ranking.
+    #[serde(default)]
+    pub semantic: Option<bool>,
+    /// Fuse BM25 and embedding ranks.
+    #[serde(default)]
+    pub hybrid: Option<bool>,
     /// Case-insensitive regex content filter (optional refinement)
     #[serde(default)]
     pub match_regex: Option<String>,
@@ -145,6 +151,32 @@ pub struct StatusParams {
     pub cwd: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UsageParams {
+    /// Optional provider namespace, for example `claude` or `codex`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional exact provider session id.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// First UTC day, inclusive (`YYYY-MM-DD`).
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Last UTC day, inclusive (`YYYY-MM-DD`).
+    #[serde(default)]
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct StatsParams {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MemoryHit {
     #[serde(rename = "ref")]
@@ -200,8 +232,7 @@ pub struct StatusResult {
     pub daemon_node_id: Option<String>,
     /// Every addressable memory source through the unified [`Origin`] shape.
     pub origins: Vec<Origin>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vars: Option<Vec<VarStatus>>,
+    pub vars: Vec<VarStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -223,6 +254,8 @@ pub fn to_search_args(params: &SearchParams) -> Result<SearchArgs, String> {
     Ok(SearchArgs {
         source: params.source.clone(),
         query: params.query.clone(),
+        semantic: params.semantic.unwrap_or(false),
+        hybrid: params.hybrid.unwrap_or(false),
         match_: params.match_regex.clone(),
         exclude: params.exclude.clone(),
         in_field: params.in_field.unwrap_or_default(),
@@ -418,6 +451,8 @@ mod tests {
         let args = to_search_args(&SearchParams {
             source: "terminal".into(),
             query: Some("panic".into()),
+            semantic: None,
+            hybrid: None,
             match_regex: Some("panic".into()),
             exclude: None,
             in_field: Some(Field::Content),
@@ -449,6 +484,8 @@ mod tests {
         let args = to_search_args(&SearchParams {
             source: "terminal".into(),
             query: None,
+            semantic: None,
+            hybrid: None,
             match_regex: None,
             exclude: None,
             in_field: None,
