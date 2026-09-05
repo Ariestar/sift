@@ -56,7 +56,7 @@ Session 是来自某个 source 的一段连续记录。
 
 - Terminal session：一组最近命令块。
 - Agent session：某个 Agent 的一次本地对话记录。
-- Pipe / run session：一次临时捕获的长输出。
+- Pipe / run session：一次写入 archive 的捕获输出。
 
 Session 不是最终用户必须记住的概念；它主要用来帮助你在 workspace 中定位：这是哪次终端工作？哪次 Agent 对话？
 
@@ -188,7 +188,7 @@ sivtr nav @hit '~' --refs          # 所属 session records
 
 ## Commands
 
-可以用这些命令打开、搜索、复制、展开、比较或临时捕获 workspace memory：
+可以用这些命令打开、搜索、复制、展开、比较或捕获 workspace memory：
 
 | 命令 | 用途 |
 | --- | --- |
@@ -202,7 +202,7 @@ sivtr nav @hit '~' --refs          # 所属 session records
 | `sivtr show` | 用 ref 或 WorkSet 展开精确内容 |
 | `sivtr share` / `remote` | 显式 opt-in 的只读跨设备记忆 remote |
 | `sivtr diff` | 比较两个最近终端命令块 |
-| `sivtr run` / pipe | 临时捕获并浏览单次命令输出 |
+| `sivtr run` / pipe | 捕获并浏览单次命令输出（写入 archive） |
 
 ## Skills 和 playbooks 在哪一层
 

@@ -1,5 +1,5 @@
 use super::refs::{WorkAt, WorkRef};
-use crate::ai::{
+use crate::agents::{
     format_structured_block, select_blocks, AgentBlock, AgentBlockKind, AgentProvider,
     AgentSelection, AgentSession,
 };
@@ -243,8 +243,8 @@ impl WorkPartKind {
     }
 
     /// Map chat-related kinds to agent block kinds for shared formatting.
-    pub fn as_agent_block_kind(self) -> Option<crate::ai::AgentBlockKind> {
-        use crate::ai::AgentBlockKind;
+    pub fn as_agent_block_kind(self) -> Option<crate::agents::AgentBlockKind> {
+        use crate::agents::AgentBlockKind;
         Some(match self {
             Self::User => AgentBlockKind::User,
             Self::Assistant => AgentBlockKind::Assistant,

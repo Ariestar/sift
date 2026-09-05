@@ -1,11 +1,11 @@
 ---
 title: Agent 会话
-description: 把已注册 Agent provider（Codex、Claude、Cursor、Hermes、OpenCode、OpenClaw、Grok、Pi、Dsh、Gemini、Goose、Qoder、Qwen…）变成可复用的 Agent 记忆。
+description: 把已注册 Agent provider 变成可复用的 Agent 记忆。
 ---
 
 `sivtr` 把 Agent transcript 当成本地 workspace memory source。你可以复制最新的有用 turn，在 picker 中浏览旧 session，跨 provider 搜索，并通过精确 ref 展示内容，而不必手动打开原始 transcript 文件。过去的 Agent 工作会成为人和后续 Agent 都能复用的记忆。
 
-Skill 是让后续 Agent 学会使用这份记忆的方式。`sivtr` memory skill 可以要求 Agent 先搜索本地终端和 Agent 历史，只展开最小相关结果，并在信任历史讨论前验证当前代码。见 [Skill 与可复用流程](/zh-cn/usage/skills/)。
+Skill 是让后续 Agent 学会使用这份记忆的方式。`sivtr` memory skill 可以要求 Agent 先搜索本地终端记录和 Agent 对话，只展开最小相关结果，并在信任之前的讨论前验证当前代码。见 [Skill 与可复用流程](/zh-cn/usage/skills/)。
 
 ## 支持的 provider
 
@@ -26,6 +26,10 @@ Provider 来自 `AgentProvider` registry。copy 使用同一组名字：
 | Pi | `sivtr copy pi ...` | Pi agent 目录下的 session JSONL |
 | Qoder / Qoder-CN | `sivtr copy qoder ...` | Qoder 与 Qoder-CN sessions |
 | Qwen | `sivtr copy qwen ...` | Qwen Code sessions |
+| Amp、Aider、iFlow、Kimi、Kimi Work | `sivtr copy <provider> ...` | provider 专属 JSON、Markdown 或 wire transcript |
+| Trae、TraeX、Copilot、VSCode Copilot、Windsurf | `sivtr copy <provider> ...` | CLI rollout 与 VS Code/Windsurf chat store |
+| OpenHands、RooCode、Kiro、Zed、Kilo、gptme、Vibe、Poolside | `sivtr copy <provider> ...` | 目录、SQLite、JSONL 或 NDJSON session |
+| Claude.ai、ChatGPT | `sivtr copy <provider> ...` | 通过 `sivtr import sessions` 导入的 session |
 
 在 search 命令中，用 `agent` target 表示所有已注册 provider：
 

@@ -3,7 +3,7 @@
 
 use anyhow::{bail, ensure, Context, Result};
 use serde::Serialize;
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::{
     config::SivtrConfig,
     origin::Reach,
@@ -775,7 +775,7 @@ mod tests {
     fn chat_turn(session: &str, index: usize, thinking: &str, tool_out: &str) -> WorkRecord {
         WorkRecord {
             schema_version: 3,
-            work_ref: WorkRef::agent(sivtr_core::ai::AgentProvider::Codex, session, index),
+            work_ref: WorkRef::agent(sivtr_core::agents::AgentProvider::Codex, session, index),
             kind: sivtr_core::record::WorkRecordKind::ChatTurn,
             source: sivtr_core::record::WorkSource {
                 channel: sivtr_core::record::WorkChannel::Chat,

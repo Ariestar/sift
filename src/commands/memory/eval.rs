@@ -13,7 +13,7 @@ use sivtr_core::search::{
     evaluate_with_ranked, EvalReport, EvalSnapshot, Filter, GoldenQuery, Searcher, Sort,
 };
 
-use crate::cli::EvalArgs;
+use crate::cli::{EvalArgs, EvalMethod};
 use crate::commands::memory::{filter, workset};
 
 pub fn execute(args: &EvalArgs) -> Result<()> {
@@ -38,7 +38,14 @@ pub fn execute(args: &EvalArgs) -> Result<()> {
         .iter()
         .map(|record| record.work_ref.whole())
         .collect();
-    let ranked = rank_all(&snapshot.queries, &snapshot.corpus, &anchors, args.sort, k);
+    let ranked = rank_all(
+        &snapshot.queries,
+        &snapshot.corpus,
+        &anchors,
+        args.sort,
+        k,
+        args.method,
+    )?;
     if let Some(dir) = args.export.as_deref() {
         export_trec(dir, &snapshot.queries, &ranked)?;
     }
@@ -93,18 +100,35 @@ fn rank_all(
     anchors: &[WorkRef],
     sort: Sort,
     k: usize,
-) -> Vec<Vec<String>> {
-    let searcher = Searcher::new(corpus);
-    queries
-        .iter()
-        .map(|query| {
-            let filter = Filter::eval(&query.query, query.field, sort, k);
-            searcher
-                .search(&filter, anchors, Path::new("."))
-                .map(|hits| hits.into_iter().map(|hit| hit.anchor.to_string()).collect())
-                .unwrap_or_default()
-        })
-        .collect()
+    method: EvalMethod,
+) -> Result<Vec<Vec<String>>> {
+    match method {
+        EvalMethod::Bm25 => {
+            let searcher = Searcher::new(corpus);
+            queries
+                .iter()
+                .map(|query| {
+                    let filter = Filter::eval(&query.query, query.field, sort, k);
+                    searcher
+                        .search(&filter, anchors, Path::new("."))
+                        .map(|hits| hits.into_iter().map(|hit| hit.anchor.to_string()).collect())
+                })
+                .collect()
+        }
+        EvalMethod::Semantic | EvalMethod::Hybrid => queries
+            .iter()
+            .map(|query| {
+                let mut ranked = crate::commands::memory::semantic::rank_records_for_eval(
+                    corpus,
+                    &query.query,
+                    query.field,
+                    matches!(method, EvalMethod::Hybrid),
+                )?;
+                ranked.truncate(k);
+                Ok(ranked)
+            })
+            .collect(),
+    }
 }
 
 fn print_table(report: &EvalReport, sort: &Sort) {

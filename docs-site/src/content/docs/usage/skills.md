@@ -25,7 +25,7 @@ sivtr mcp install -y
 sivtr mcp install -p claude,cursor -l global
 ```
 
-This writes `sivtr mcp serve` into host config for registered hosts (Claude Code, Cursor, Codex, OpenCode, OpenClaw, Grok, Hermes, Pi, Qoder/Qoder-CN, Gemini, Qwen, Goose, …). MCP tools: `sivtr_search`, `sivtr_show`, `sivtr_zoom`, `sivtr_filter`, `sivtr_status` (includes local workspace origin labels from `ws` and remotes). The skill still teaches *when* and *how* to retrieve evidence; MCP is the structured execution surface. See [CLI Reference](/reference/cli/#mcp).
+This writes `sivtr mcp serve` into host config for registered hosts (Claude Code, Cursor, Codex, OpenCode, OpenClaw, Grok, Hermes, Pi, Qoder/Qoder-CN, Gemini, Qwen, Goose, …). MCP tools: `sivtr_search`, `sivtr_show`, `sivtr_zoom`, `sivtr_filter`, `sivtr_status`, `sivtr_usage`, and `sivtr_stats` (status includes local workspace origin labels from `ws` and remotes). The skill still teaches *when* and *how* to retrieve evidence; MCP is the structured execution surface. See [CLI Reference](/reference/cli/#mcp).
 
 ## Why skills matter
 

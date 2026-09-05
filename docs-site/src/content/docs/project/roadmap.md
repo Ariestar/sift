@@ -22,12 +22,12 @@ Reliable CLI
 | Track | Status | Target outcome |
 | --- | --- | --- |
 | CLI foundation | In progress | A daily command-line utility for capturing, searching, selecting, and exporting terminal and agent work. |
-| Agent support | In progress | Provider-neutral parsing and browsing for AI-agent conversation records. |
-| Retrieval quality | Next | Structured, precise, rankable search that makes the evidence paradigm trustworthy at scale. |
+| Agent support | Landed (core) | Provider-neutral parsing and browsing for AI-agent conversation records. |
+| Retrieval quality | Landed (core) | Structured, precise, rankable search that makes the evidence paradigm trustworthy at scale. |
 | Skills and playbooks | In progress | Reusable agent procedures that use `sivtr` as the unified memory entry point. |
-| Agent interfaces | In progress | CLI, MCP, and later local API / SDK surfaces so other agents can treat `sivtr` as work-memory infrastructure. |
+| Agent interfaces | Landed (core) | CLI, MCP, and local Web API surfaces so other agents can treat `sivtr` as work-memory infrastructure. |
 | TUI workspace | Planned | A dense keyboard-first interface for many sessions, many providers, and long conversations. |
-| Source expansion | Planned | More capture surfaces beyond current shells and coding agents, without weakening the shared model. |
+| Source expansion | Landed (core) | More capture surfaces beyond current shells and coding agents, without weakening the shared model. |
 | Remote collaboration | Landed (core) | Permissioned, read-only access to teammate workspace memory via Share / Grant / Mount. |
 | Privacy and lifecycle | Planned | Redaction, retention, expiry, and selective disclosure so sensitive work does not leak or rot in place. |
 | Provenance and trust | Planned | Source-traced, versioned, trust-scored memory that can be verified and pruned. |
@@ -43,12 +43,12 @@ The near-term priority is to make the command-line surface complete, predictable
 - [x] Capture subprocess output with `sivtr run`.
 - [x] Import shell session logs.
 - [x] Copy recent command input, output, and command blocks by selector.
-- [x] Search saved output history with SQLite.
+- [x] Search captured output in the unified archive.
 - [x] Provide TOML configuration for core behavior.
-- [ ] Tighten command naming and option consistency across `copy`, `history`, `codex`, `hotkey`, and workspace flows.
+- [x] Remove the obsolete Codex mirror/export path and keep command naming centered on the unified archive.
 - [ ] Make selectors and filters easier to compose in shell scripts.
-- [ ] Strengthen import, export, and search behavior for larger local archives.
-- [ ] Keep configuration explicit, portable, and safe to share.
+- [x] Strengthen import, export, and search behavior for the local archive.
+- [x] Keep configuration explicit, portable, and safe to share.
 
 ## Agent support
 
@@ -58,22 +58,22 @@ Agent sessions are a first-class memory source. The product goal is for agent tr
 - [x] Parse provider session records through shared helpers (JSONL / SQLite).
 - [x] Copy the latest user, assistant, tool, turn, or full session block.
 - [x] Browse local and mirrored session directories through picker workflows.
-- [ ] Support more agent providers behind the shared session-provider interface.
-- [ ] Keep provider-specific parsing isolated from shared selection, search, and export logic.
-- [ ] Make session discovery robust across local, mirrored, and shared transcript directories.
-- [ ] Expose provider selection consistently in CLI commands, hotkeys, and the TUI workspace.
-- [ ] Avoid binding the data model to one vendor's transcript format.
+- [x] Support the expanded provider catalog behind the shared session-provider interface.
+- [x] Keep provider-specific parsing isolated from shared selection, search, and export logic.
+- [x] Make session discovery robust across local, container, and shared transcript sources.
+- [x] Expose provider selection consistently in CLI commands, hotkeys, and the TUI workspace.
+- [x] Avoid binding the data model to one vendor's transcript format.
 
 ## Retrieval quality
 
 Retrieval quality decides whether the evidence paradigm is actually usable. `sivtr` should make structured search excellent before adding semantic layers.
 
-- [ ] Expand search beyond basic matching toward explicit scopes, literal / keyword / fuzzy methods, source filters, ranking, and context-rich machine-readable results.
-- [ ] Keep progressive disclosure as the default: compact refs first, full content only when selected.
-- [ ] Improve recency, status, provider, session, and part-kind ranking so useful evidence surfaces first.
-- [ ] Make search results stable enough for scripts and agents: deterministic ranking options, rich JSON, and WorkRef-preserving output.
-- [ ] Add evaluation fixtures and golden queries so retrieval changes can be measured, not only felt.
-- [ ] Treat semantic / vector search as an optional method on top of this foundation, not a replacement for structured filters.
+- [x] Expand search beyond basic matching toward explicit scopes, source filters, ranking, and context-rich machine-readable results.
+- [x] Keep progressive disclosure as the default: compact refs first, full content only when selected.
+- [x] Improve recency, status, provider, session, and part-kind ranking so useful evidence surfaces first.
+- [x] Make search results stable enough for scripts and agents: deterministic ranking options, rich JSON, and WorkRef-preserving output.
+- [x] Add evaluation fixtures and golden queries so retrieval changes can be measured, not only felt.
+- [x] Treat semantic / vector search as an optional method on top of this foundation, not a replacement for structured filters.
 
 ## Skills and playbooks
 
@@ -92,11 +92,11 @@ Skills make `sivtr` usable by agents as a shared memory entry point. They turn g
 
 - [x] CLI surface for capture, search, show, filter, nav, zoom, copy, and remote memory.
 - [x] Read-only MCP server and host install flow.
-- [ ] Stabilize MCP tool contracts around WorkRef / WorkSet semantics and progressive disclosure.
-- [ ] Add a local developer API for programmatic query and export without shelling out when needed.
+- [x] Stabilize MCP tool contracts around WorkRef / WorkSet semantics and progressive disclosure.
+- [x] Add a local developer API for programmatic query, usage, stats, and export without shelling out.
 - [ ] Publish a thin SDK or client library only after CLI / MCP contracts stabilize.
-- [ ] Keep every interface evidence-first: return refs, provenance, and selectable parts rather than opaque blobs.
-- [ ] Prefer local, opt-in services over always-on cloud endpoints.
+- [x] Keep every interface evidence-first: return refs, provenance, and selectable parts rather than opaque blobs.
+- [x] Prefer local, opt-in services over always-on cloud endpoints.
 
 ## TUI workspace
 
@@ -116,12 +116,12 @@ The TUI should remain fast and keyboard-first, but it needs to scale from single
 
 More platforms should widen capture, not fragment the model. New sources must map into the shared WorkRecord / WorkPart / WorkRef abstractions.
 
-- [ ] Add more coding-agent and IDE transcript providers behind the shared provider interface.
+- [x] Add more coding-agent and IDE transcript providers behind the shared provider interface.
 - [ ] Support additional shells and terminal capture paths where the existing hook model is insufficient.
-- [ ] Explore importers for web AI conversations and collaboration tools only when durable local exports or APIs exist.
-- [ ] Prefer offline-first import and local indexes over scraping fragile remote UIs.
-- [ ] Keep provider adapters thin; search, privacy, ranking, and export stay shared.
-- [ ] Reject sources that cannot preserve provenance back to an original session or artifact.
+- [x] Import web AI conversations when durable local exports exist (Claude.ai and ChatGPT JSON/ZIP).
+- [x] Prefer offline-first import and local indexes over scraping fragile remote UIs.
+- [x] Keep provider adapters thin; search, privacy, ranking, and export stay shared.
+- [x] Reject sources that cannot preserve provenance back to an original session or artifact.
 
 ## Remote collaboration
 
@@ -149,6 +149,7 @@ Core model landed: **Device Daemon + Identity + Share + Grant + Mount** over enc
 Permissioned sharing is not enough. Memory must also be safe to keep, safe to share, and safe to forget.
 
 - [x] Default secret redaction on remote share paths.
+- [x] Record archive-level secret findings without exposing secret values.
 - [ ] Expand redaction rules for tokens, keys, cookies, env dumps, and other high-risk patterns.
 - [ ] Support private tags / exclude markers so sensitive spans never enter durable indexes.
 - [ ] Add retention and expiry policies for local archives and shared mounts.
@@ -160,23 +161,23 @@ Permissioned sharing is not enough. Memory must also be safe to keep, safe to sh
 
 Evidence is only useful if callers can verify where it came from and whether it is still current.
 
-- [ ] Preserve source provenance on every record, part, summary, and export.
-- [ ] Track memory versions so re-imported or re-parsed sessions do not silently overwrite history.
-- [ ] Attach trust / freshness signals such as capture time, source reliability, and supersession.
+- [x] Preserve source provenance on every record, part, summary, and export.
+- [x] Keep one current derived archive projection; re-sync replaces a session atomically instead of maintaining parallel memory versions.
+- [x] Attach freshness signals such as source stamps and sync status.
 - [ ] Support expiry and quarantine of stale or contradicted memory so old data does not pollute retrieval.
-- [ ] Make search and profile surfaces show enough provenance for a human or agent to re-open the original evidence.
+- [x] Make search and profile surfaces show enough provenance for a human or agent to re-open the original evidence.
 - [ ] Prefer citeable WorkRefs over free-floating regenerated summaries.
 
 ## Semantic and multimodal memory
 
 Semantic and multimodal retrieval can raise the ceiling, but only after structured evidence search is strong.
 
-- [ ] Optional local vector / embedding index as one search method alongside literal, keyword, and fuzzy.
-- [ ] Keep hybrid retrieval: structured filters first, semantic ranking second.
-- [ ] Avoid mandatory cloud embedding providers; local or user-chosen backends only.
+- [x] Optional local vector / embedding index as one search method alongside literal and structured ranking.
+- [x] Keep hybrid retrieval: structured filters first, semantic ranking second.
+- [x] Avoid mandatory cloud embedding providers; local or user-chosen backends only.
 - [ ] Index multimodal artifacts only when they can be addressed by stable refs and reopened later.
 - [ ] Support locating historical images and other non-text artifacts without discarding text provenance.
-- [ ] Never let embeddings become the sole source of truth; raw records remain authoritative.
+- [x] Never let embeddings become the sole source of truth; raw records remain authoritative.
 
 ## A2A messenger
 
@@ -217,7 +218,7 @@ The roadmap does not imply that `sivtr` will become:
 ## Principles
 
 - **Capture first.** Important work should be recorded when it happens, not reconstructed later from memory.
-- **Local by default.** Personal transcripts and terminal history should remain under user control unless explicitly shared or exported.
+- **Local by default.** Personal transcripts and terminal records should remain under user control unless explicitly shared or exported.
 - **Provider-neutral.** Agent support should be implemented through replaceable providers and stable shared abstractions.
 - **Evidence over paraphrase.** Prefer citeable raw records and WorkRefs over opaque regenerated summaries.
 - **Structured search first.** Semantic and multimodal retrieval are additives, not substitutes for precise filters and refs.

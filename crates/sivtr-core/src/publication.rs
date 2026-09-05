@@ -757,7 +757,7 @@ fn record_for_whole_anchor<'a>(
 
 fn validate_granular_record(
     record: &WorkRecord,
-    provider: Option<crate::ai::AgentProvider>,
+    provider: Option<crate::agents::AgentProvider>,
     session: Option<&str>,
 ) -> Result<()> {
     ensure!(
@@ -896,7 +896,7 @@ mod tests {
     fn record(index: usize, assistant: &str) -> WorkRecord {
         WorkRecord {
             schema_version: 3,
-            work_ref: WorkRef::agent(crate::ai::AgentProvider::Codex, "session", index),
+            work_ref: WorkRef::agent(crate::agents::AgentProvider::Codex, "session", index),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
                 channel: WorkChannel::Chat,
@@ -1029,7 +1029,7 @@ mod tests {
         let records = vec![record(1, "a"), record(3, "b")];
         assert!(create_publication_draft(&records, &[], &PublicationPolicy::default()).is_err());
         let mut mixed = record(2, "b");
-        mixed.work_ref = WorkRef::agent(crate::ai::AgentProvider::Codex, "other", 2);
+        mixed.work_ref = WorkRef::agent(crate::agents::AgentProvider::Codex, "other", 2);
         assert!(create_publication_draft(
             &[record(1, "a"), mixed],
             &[],
@@ -1039,8 +1039,8 @@ mod tests {
         assert!(create_publication_draft(
             &[record(1, "a")],
             &[
-                WorkRef::agent(crate::ai::AgentProvider::Codex, "session", 1).with_part(1),
-                WorkRef::agent(crate::ai::AgentProvider::Codex, "session", 1).with_part(2),
+                WorkRef::agent(crate::agents::AgentProvider::Codex, "session", 1).with_part(1),
+                WorkRef::agent(crate::agents::AgentProvider::Codex, "session", 1).with_part(2),
             ],
             &PublicationPolicy::default()
         )
@@ -1347,7 +1347,8 @@ mod tests {
         .is_err());
 
         let mut other_provider = granular_record(2);
-        other_provider.work_ref = WorkRef::agent(crate::ai::AgentProvider::Claude, "session", 2);
+        other_provider.work_ref =
+            WorkRef::agent(crate::agents::AgentProvider::Claude, "session", 2);
         other_provider.source.provider = Some("claude".into());
         let cross = [
             local.work_ref.with_part(1),

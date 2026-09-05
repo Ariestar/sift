@@ -4,12 +4,10 @@ use std::path::PathBuf;
 
 /// Top-level configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SivtrConfig {
     /// Editor settings.
     pub editor: EditorConfig,
-    /// History settings.
-    pub history: HistoryConfig,
     /// Unified archive sync settings.
     pub sync: SyncConfig,
     /// Global hotkey settings.
@@ -20,6 +18,8 @@ pub struct SivtrConfig {
     pub mcp: McpConfig,
     /// Browser publication service settings.
     pub publish: PublishConfig,
+    /// OpenAI-compatible embedding service for semantic search.
+    pub embedding: EmbeddingConfig,
 }
 
 /// Editor configuration.
@@ -29,16 +29,6 @@ pub struct EditorConfig {
     /// Editor command. If empty, auto-detect from PATH.
     /// Examples: "hx", "nvim", "vim", "code --wait"
     pub command: String,
-}
-
-/// History storage settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct HistoryConfig {
-    /// Whether to automatically save captured output to history.
-    pub auto_save: bool,
-    /// Maximum number of history entries to keep (0 = unlimited).
-    pub max_entries: usize,
 }
 
 /// Unified archive sync settings.
@@ -107,16 +97,23 @@ pub struct PublishConfig {
     pub endpoint: String,
 }
 
-// --- Defaults ---
-
-impl Default for HistoryConfig {
-    fn default() -> Self {
-        Self {
-            auto_save: true,
-            max_entries: 0, // unlimited
-        }
-    }
+/// Semantic-search embedding service. An empty endpoint deliberately disables
+/// semantic modes; callers must configure a concrete local or remote service.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EmbeddingConfig {
+    /// Full OpenAI-compatible `/embeddings` endpoint.
+    pub endpoint: String,
+    /// Model name sent in each request.
+    pub model: String,
+    /// Environment variable containing the bearer token; set empty for a
+    /// local endpoint that does not require authentication.
+    pub api_key_env: String,
+    /// Maximum inputs per request.
+    pub batch_size: usize,
 }
+
+// --- Defaults ---
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
@@ -136,6 +133,17 @@ impl Default for PublishConfig {
     fn default() -> Self {
         Self {
             endpoint: "https://share.hnnulwh.cn".to_string(),
+        }
+    }
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            model: "text-embedding-3-small".to_string(),
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            batch_size: 64,
         }
     }
 }
@@ -230,6 +238,22 @@ mod tests {
     }
 
     #[test]
+    fn serializes_embedding_config_without_inventing_an_endpoint() {
+        let config = SivtrConfig {
+            embedding: EmbeddingConfig {
+                endpoint: "http://127.0.0.1:9000/v1/embeddings".to_string(),
+                api_key_env: String::new(),
+                ..EmbeddingConfig::default()
+            },
+            ..SivtrConfig::default()
+        };
+        let toml = to_toml_string(&config).expect("serialize embedding config");
+        assert!(toml.contains("[embedding]"));
+        assert!(toml.contains("127.0.0.1:9000"));
+        assert!(SivtrConfig::default().embedding.endpoint.is_empty());
+    }
+
+    #[test]
     fn serializes_mcp_idle_exit_config() {
         let config = SivtrConfig {
             mcp: McpConfig { idle_exit_secs: 60 },
@@ -276,5 +300,13 @@ mod tests {
         // A misspelled key (`mod` instead of `mode`) is rejected too; serde
         // would otherwise ignore the unknown field and keep `mode` at auto.
         assert!(toml::from_str::<SivtrConfig>("[theme]\nmod = \"light\"\n").is_err());
+    }
+
+    #[test]
+    fn rejects_removed_history_config() {
+        assert!(
+            toml::from_str::<SivtrConfig>("[history]\nauto_save = true\nmax_entries = 0\n")
+                .is_err()
+        );
     }
 }

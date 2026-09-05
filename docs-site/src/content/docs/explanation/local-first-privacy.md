@@ -3,15 +3,14 @@ title: Local-first and Privacy
 description: How sivtr keeps agent memory, terminal output, and transcripts under local user control.
 ---
 
-`sivtr` is designed around local agent memory. Terminal output, shell session logs, history, and agent transcripts can contain secrets, private code, credentials, internal URLs, and unfinished reasoning. The default posture is to keep that data on the machine that already produced it.
+`sivtr` is designed around local agent memory. Terminal output, shell session logs, and agent transcripts can contain secrets, private code, credentials, internal URLs, and unfinished reasoning. The default posture is to keep that data on the machine that already produced it.
 
 ## Local by default
 
 `sivtr` reads and writes local files and databases:
 
 - shell session logs from shell integration;
-- local SQLite history for captured terminal output;
-- the unified session archive (`archive.db`);
+- the unified session archive (`archive.db`), including one-shot terminal captures;
 - provider-owned agent transcript files or databases;
 - local config under the platform config directory.
 
@@ -19,8 +18,7 @@ It does not provide a hosted transcript service by default.
 
 ## The local archive
 
-Terminal captures and agent sessions sync into one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth, read only locally by the sync engine (plus self-healing loads that parse a native file when the archive copy is missing or stale).
-
+Terminal captures and agent sessions live in one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth: the sync engine reads them, and session-addressed loads self-heal by parsing the native file when the archive copy is missing or stale.
 ## Explicit remote share
 
 Cross-device memory access is also opt-in. Nothing leaves the machine until you create a share (`sivtr share` / `share add`), issue an invite (`share invite`), and a peer redeems it:
@@ -49,18 +47,6 @@ sivtr copy claude out
 ```
 
 Treat clipboard contents as shared with your desktop environment and clipboard managers. Use `--print` to inspect text before copying sensitive content in risky contexts.
-
-## History retention is configurable
-
-Captured terminal output is saved to history when enabled:
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-Set `auto_save = false` if captures should not be written automatically. Set `max_entries` to a positive number to bound retained history.
 
 ## Good operational habits
 

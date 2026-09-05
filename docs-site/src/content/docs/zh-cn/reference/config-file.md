@@ -19,10 +19,6 @@ description: TOML 配置参考。
 [editor]
 command = "nvim"
 
-[history]
-auto_save = true
-max_entries = 0
-
 [sync]
 max_age_secs = 15
 
@@ -34,6 +30,12 @@ mode = "auto"
 
 [mcp]
 idle_exit_secs = 60
+
+[embedding]
+endpoint = "https://api.openai.com/v1/embeddings"
+model = "text-embedding-3-small"
+api_key_env = "OPENAI_API_KEY"
+batch_size = 64
 ```
 
 ## editor
@@ -56,19 +58,6 @@ command = "vim"
 command = "code --wait"
 ```
 
-## history
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-| Key | 类型 | 默认值 | 含义 |
-| --- | --- | --- | --- |
-| `auto_save` | boolean | `true` | 保存捕获输出到 history |
-| `max_entries` | integer | `0` | 最大保留条目数。`0` 表示无限制。 |
-
 ## sync
 
 ```toml
@@ -79,6 +68,19 @@ max_age_secs = 15
 | Key | 类型 | 默认值 | 含义 |
 | --- | --- | --- | --- |
 | `max_age_secs` | integer | `15` | archive 距上次同步多少秒后，查询会触发一次增量重同步。`0` 表示每次查询都重新列目录。 |
+
+## embedding
+
+```toml
+[embedding]
+endpoint = "https://api.openai.com/v1/embeddings"
+model = "text-embedding-3-small"
+api_key_env = "OPENAI_API_KEY"
+batch_size = 64
+```
+
+semantic 和 hybrid 搜索必须显式配置 OpenAI-compatible embedding endpoint。
+endpoint 必须使用 HTTPS；本地开发允许 loopback HTTP。`api_key_env` 为空时不发送认证 header。
 
 ## hotkey
 

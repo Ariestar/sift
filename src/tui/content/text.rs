@@ -82,7 +82,7 @@ pub(crate) fn is_structure_marker(line: &str) -> bool {
 mod tests {
     use super::content_io_from_record;
     use crate::tui::content::io::ExpandedBlocks;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{WorkPart, WorkPartData, WorkRecord, WorkRef};
 
     fn tool_part(seq: usize, tool: &str, input: &str) -> WorkPart {

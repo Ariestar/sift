@@ -17,7 +17,7 @@ Follow [Installation](/start/installation/) first. The important point is that a
 
 After that, the agent can be told to "use sivtr first" and will have a concrete procedure for searching local memory.
 
-## 2. Put terminal history into the workspace
+## 2. Put terminal work into the workspace
 
 If this is your first time using `sivtr`, install shell integration once:
 

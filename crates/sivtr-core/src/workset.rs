@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::AgentProvider;
+use crate::agents::AgentProvider;
 use crate::query::{load_session_records, LoadMode};
 use crate::record::{WorkAt, WorkPath, WorkRecord, WorkRef, WorkScope};
 use std::collections::{HashMap, HashSet};
@@ -148,6 +148,10 @@ impl WorkSet {
 
     pub fn anchors(&self) -> &[WorkRef] {
         &self.anchors
+    }
+
+    pub fn cwd(&self) -> &str {
+        &self.cwd
     }
 
     pub fn records(&self) -> &[WorkRecord] {

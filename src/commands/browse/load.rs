@@ -20,7 +20,7 @@ use crate::pane::{
 use crate::tui::workspace::{
     SourceLoadMarker, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
 };
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::origin::Reach;
 use sivtr_core::record::WorkRecord;
 
@@ -768,7 +768,7 @@ fn record_modified(record: &WorkRecord) -> Option<SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkChannel, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };

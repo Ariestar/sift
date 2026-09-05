@@ -76,11 +76,11 @@ sivtr search agent --match "panic" --format timeline
 
 | 层 | 说明 |
 | --- | --- |
-| 发生过什么 | 终端输出、命令块、Agent 对话、工具结果和本地 history。 |
+| 发生过什么 | 终端输出、命令块、Agent 对话和工具结果，统一保存在本地 archive。 |
 | 怎么复用 | TUI 浏览、search、copy、show、diff、skill、playbook、命名 remote，以及 `@last` 这类记忆变量。 |
 
 终端 source 产生命令块，Agent provider 产生对话块。`1`、`2..4` 这样的 selector 用来选择最近条目。搜索结果可以保存成 `@failures` 这样的变量，再展示、扩展或管道传给下一条命令。
 
 ## 默认本地优先
 
-`sivtr` 读取本地 shell 日志、本地 history 和本地 Agent transcript。跨设备访问通过 [远程访问](/zh-cn/usage/remote-access/) 显式开启。数据位置见 [数据位置](/zh-cn/reference/data-locations/)。
+`sivtr` 读取本地 shell 日志和本地 Agent transcript，并统一写入 archive。跨设备访问通过 [远程访问](/zh-cn/usage/remote-access/) 显式开启。数据位置见 [数据位置](/zh-cn/reference/data-locations/)。

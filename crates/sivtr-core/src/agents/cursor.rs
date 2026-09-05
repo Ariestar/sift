@@ -50,6 +50,7 @@ impl AgentSessionProvider for CursorProvider {
                 .map(str::to_string);
             sessions.push(SessionInfo {
                 path,
+                physical_path: None,
                 id,
                 cwd: None,
                 title: None,

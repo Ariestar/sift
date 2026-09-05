@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::ai::AgentProvider;
+use crate::agents::AgentProvider;
 use crate::record::{WorkPath, WorkRecord, WorkRecordIndex, WorkRef, WorkRefSelector};
-use crate::session_source::{source_by_namespace, workspace_sources, SessionSource};
+use crate::session_source::{workspace_sources, SessionSource};
 
 /// Prefix of the error [`load_workspace_source`] raises when a selector
 /// matches no records. An empty source is a normal browse outcome (a
@@ -200,28 +200,22 @@ fn all_agent_providers() -> Vec<AgentProvider> {
         .collect()
 }
 
-/// Load one session file's records from the archive (either view), or parse
-/// the source file and archive it on a miss. Public so that CLI consumers
-/// (e.g. `WorkSet::materialize_parts`) can fetch a single session's full
-/// records on demand.
+/// Load one session file's records from the archive (either view). A missing
+/// or stale archive row is an explicit error: native transcripts are ingested
+/// only by the sync engine, never as a hidden query-time fallback.
 pub fn load_session_records(
     namespace: &str,
     path: &Path,
     mode: LoadMode,
 ) -> Result<Vec<WorkRecord>> {
     let conn = crate::archive::open()?;
-    if let Some(records) =
-        crate::archive::store::load_records_by_path(&conn, namespace, path, mode.into())?
-    {
-        return Ok(records);
-    }
-    // Self-heal: the session is missing or stale in the archive — parse the
-    // source file, archive it for future loads, and serve the fresh records.
-    let source = source_by_namespace(namespace)
-        .with_context(|| format!("unknown session namespace `{namespace}`"))?;
-    let records = source.parse_file(path)?;
-    crate::archive::sync::store_session_records(namespace, path, &records);
-    Ok(records)
+    crate::archive::store::load_records_by_path(&conn, namespace, path, mode.into())?
+        .with_context(|| {
+            format!(
+                "session `{namespace}:{}` is not present or is stale in the archive; run `sivtr sync`",
+                path.display()
+            )
+        })
 }
 
 /// Serial single-source parse path, kept for tests that drive a mocked
@@ -374,7 +368,7 @@ fn rewrite_record_session_display_id(record: &mut WorkRecord, display_id: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::{AgentBlock, AgentBlockKind, AgentSession};
+    use crate::agents::{AgentBlock, AgentBlockKind, AgentSession};
     use crate::record::{
         WorkChannel, WorkPart, WorkPartData, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };
@@ -481,6 +475,7 @@ mod tests {
             infos: vec![
                 SessionInfo {
                     path: PathBuf::from("broken.jsonl"),
+                    physical_path: None,
                     id: Some("broken".to_string()),
                     cwd: Some("/repo".to_string()),
                     title: Some("broken".to_string()),
@@ -488,6 +483,7 @@ mod tests {
                 },
                 SessionInfo {
                     path: PathBuf::from("good.jsonl"),
+                    physical_path: None,
                     id: Some("good".to_string()),
                     cwd: Some("/repo".to_string()),
                     title: Some("good".to_string()),

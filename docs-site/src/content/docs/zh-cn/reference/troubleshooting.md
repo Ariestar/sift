@@ -45,16 +45,6 @@ sivtr copy out --print
 
 如果 pipe mode 正常但 `copy` 不工作，问题通常在 session logging，而不是 browser。
 
-## `sivtr import` 没打开有用内容
-
-`import` 读取当前结构化 shell session log。它在 shell 集成已经在当前 shell 进程记录过多个命令后最有用。
-
-尝试：
-
-1. `sivtr init <shell>` 后重启 shell。
-2. 运行一个可见命令，例如 `echo hello`。
-3. 运行 `sivtr import`。
-
 ## Agent provider picker 为空
 
 Provider picker 只显示当前工作区可发现的本地 session。

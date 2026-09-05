@@ -3,7 +3,7 @@ title: 快捷键
 description: Workspace picker、Content、搜索、行过滤和 Vim view 快捷键。
 ---
 
-本页记录 workspace picker TUI（默认的 `sivtr` 界面）。`pipe`/`run`/`import` 使用的单缓冲 browser 已移除——这些命令现在写入历史并用外部编辑器打开。
+本页记录 workspace picker TUI（默认的 `sivtr` 界面）。`pipe`/`run`/`import` 使用的单缓冲 browser 已移除——这些命令现在写入统一 archive 并用外部编辑器打开。
 
 ## Workspace picker
 

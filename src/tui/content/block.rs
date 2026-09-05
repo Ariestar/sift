@@ -351,7 +351,7 @@ fn render_block(
 mod tests {
     use super::*;
     use crate::tui::content::io::ExpandedBlocks;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkChannel, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
         RECORD_SCHEMA_VERSION,

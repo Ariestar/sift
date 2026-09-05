@@ -5,6 +5,7 @@ pub mod filter;
 pub mod nav;
 pub mod records;
 pub mod search;
+pub mod semantic;
 pub mod show;
 pub mod time_filter;
 pub mod var;

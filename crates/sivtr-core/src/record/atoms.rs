@@ -107,7 +107,7 @@ fn same_idless_tool(call_tool: Option<&str>, result_tool: Option<&str>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::AgentProvider;
+    use crate::agents::AgentProvider;
     use crate::record::{
         WorkChannel, WorkPart, WorkPartData, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
         WorkTime,

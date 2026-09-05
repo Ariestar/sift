@@ -108,7 +108,7 @@ fn start(args: HotkeyStartArgs) -> Result<()> {
         clear_state_file()?;
     }
 
-    let config = SivtrConfig::load().unwrap_or_default();
+    let config = SivtrConfig::load()?;
     let chord = args.chord.unwrap_or(config.hotkey.chord);
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;

@@ -13,7 +13,7 @@
 
 use dark_light::Mode;
 use ratatui::prelude::{Color, Modifier, Style};
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::agents::AgentProvider;
 use sivtr_core::config::ThemeMode;
 use std::cell::Cell;
 use std::time::Duration;
@@ -163,6 +163,12 @@ pub(crate) const fn provider_colors(provider: AgentProvider) -> ProviderColors {
             dark: Color::Rgb(163, 230, 53), // lime-400
             light: Color::Rgb(63, 98, 18),  // lime-800
             ansi: Color::LightGreen,
+            ansi_light: Color::DarkGray,
+        },
+        _ => ProviderColors {
+            dark: Color::Rgb(16 + provider as u8, 130, 220),
+            light: Color::Rgb(16 + provider as u8, 80, 150),
+            ansi: Color::White,
             ansi_light: Color::DarkGray,
         },
     }

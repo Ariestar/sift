@@ -60,6 +60,7 @@ impl AgentSessionProvider for OpenCodeProvider {
             sessions.push(SessionInfo {
                 modified: system_time_from_millis(updated),
                 path: opencode_session_path(&id),
+                physical_path: Some(db_path.clone()),
                 id: Some(id),
                 cwd: Some(session_cwd).filter(|value| !value.trim().is_empty()),
                 title: Some(title).filter(|title| !title.trim().is_empty()),

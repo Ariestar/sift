@@ -181,6 +181,7 @@ fn list_sessions_from_db(db_path: &Path, agent_id: &str) -> Result<Vec<SessionIn
 
         sessions.push(SessionInfo {
             path: openclaw_session_path(agent_id, &session_id),
+            physical_path: Some(db_path.to_path_buf()),
             id: Some(session_id),
             cwd,
             title,
@@ -267,6 +268,7 @@ fn list_legacy_jsonl_sessions() -> Result<Vec<SessionInfo>> {
                 .unwrap_or(UNIX_EPOCH);
             out.push(SessionInfo {
                 path,
+                physical_path: None,
                 id: Some(id),
                 cwd: None,
                 title: None,

@@ -76,7 +76,6 @@ export default defineConfig({
             'usage/web-ui',
             'usage/skills',
             'usage/remote-access',
-            'usage/history',
             'usage/configuration',
             'usage/launchers-and-hotkeys',
           ],
