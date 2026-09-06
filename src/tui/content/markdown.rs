@@ -319,7 +319,7 @@ fn markdown_line_parts(line: &str) -> MarkdownLineParts<'_> {
     let trimmed = &line[leading_width..];
 
     if let Some((level, rest)) = markdown_heading(trimmed) {
-        let style = agent_heading_style(rest).unwrap_or_else(|| heading_style(level));
+        let style = heading_style(level);
         return MarkdownLineParts {
             prefix: format!("{leading}{} ", "#".repeat(level)),
             prefix_style: structure_prefix_style(),
@@ -870,23 +870,6 @@ fn current_style(styles: &[Style]) -> Style {
     styles.last().copied().unwrap_or_default()
 }
 
-fn agent_heading_style(text: &str) -> Option<Style> {
-    let color = if text.starts_with("Assistant") {
-        crate::tui::theme::success()
-    } else if text.starts_with("User") {
-        crate::tui::theme::user()
-    } else if text.starts_with("Command") {
-        crate::tui::theme::structure_color(false)
-    } else if text.starts_with("Error") {
-        crate::tui::theme::failure()
-    } else if text.starts_with("Output") {
-        crate::tui::theme::output()
-    } else {
-        return None;
-    };
-    Some(Style::default().fg(color).add_modifier(Modifier::BOLD))
-}
-
 /// Style for `<:channel:…:>` structure markers (tools/skills/thinking/mcp):
 /// structural content renders in a subdued gray, distinct from the
 /// default-foreground body.
@@ -959,22 +942,20 @@ mod tests {
     use ratatui::prelude::Modifier;
 
     #[test]
-    fn renders_agent_headings_with_provider_roles() {
+    fn renders_headings_by_level_not_text() {
         let lines = render_markdown_window(&["## User", "## Assistant"], 0, 2, 80);
         let user = &lines[0].line;
         let assistant = &lines[1].line;
 
         assert_eq!(user.spans[0].content.as_ref(), "## ");
         assert_eq!(user.spans[1].content.as_ref(), "User");
-        assert_eq!(user.spans[1].style.fg, Some(crate::tui::theme::user()));
-        assert_eq!(
-            assistant.spans[1].style.fg,
-            Some(crate::tui::theme::success())
-        );
+        // Heading color depends on the heading level alone — never on the
+        // text content.
+        assert_eq!(user.spans[1].style, assistant.spans[1].style);
     }
 
     #[test]
-    fn renders_work_part_headings_with_distinct_styles() {
+    fn renders_structure_markers_in_muted_gray() {
         let lines = render_markdown_window(
             &[
                 "## Command",
@@ -989,10 +970,6 @@ mod tests {
             80,
         );
 
-        assert_eq!(
-            lines[0].line.spans[1].style.fg,
-            Some(crate::tui::theme::structure_color(false))
-        ); // Command heading stays amber
         for marker in [1, 2, 3, 4] {
             assert_eq!(
                 lines[marker].line.spans[0].style.fg,
@@ -1000,10 +977,6 @@ mod tests {
                 "structure marker line {marker} must render gray"
             );
         }
-        assert_eq!(
-            lines[5].line.spans[1].style.fg,
-            Some(crate::tui::theme::failure())
-        ); // Error
     }
 
     #[test]
