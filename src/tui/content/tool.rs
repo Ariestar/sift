@@ -503,34 +503,21 @@ mod tests {
         input: Option<Value>,
         output: Option<(Value, Option<u64>)>,
     ) -> WorkPart {
-        let has_output = output.is_some();
-        WorkPart {
+        let start_line = output.as_ref().and_then(|(_, line)| *line);
+        let mut part = crate::test_fixtures::tool_action_part(
             seq,
-            occurred_at: None,
-            body: WorkPartBody::Action {
-                id: format!("a{seq}"),
-                actor: WorkActor::Agent,
-                target: WorkTarget::Tool {
-                    name: Some(tool.to_string()),
-                },
-                title: None,
-                input: input.map(WorkContent::Json),
-                output: output
-                    .map(|(value, start_line)| {
-                        vec![WorkContentBlock {
-                            content: WorkContent::Json(value),
-                            start_line,
-                        }]
-                    })
-                    .unwrap_or_default(),
-                status: if has_output {
-                    WorkActionStatus::Completed
-                } else {
-                    WorkActionStatus::InProgress
-                },
-                exit_code: None,
-            },
+            &format!("a{seq}"),
+            Some(tool),
+            input,
+            output.map(|(value, _)| value),
+        );
+        if let WorkPartBody::Action { output, status, .. } = &mut part.body {
+            if let Some(block) = output.first_mut() {
+                block.start_line = start_line;
+            }
+            *status = WorkActionStatus::Completed;
         }
+        part
     }
 
     fn call(tool: &str, input: Value) -> WorkPart {

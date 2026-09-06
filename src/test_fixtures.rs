@@ -54,6 +54,45 @@ pub fn shell_action_part(seq: usize, command: &str, output: Option<&str>) -> Wor
     }
 }
 
+/// One agent tool action carrying input and result — the shape the core
+/// reducer builds once a call's result event arrives.
+pub fn tool_action_part(
+    seq: usize,
+    id: &str,
+    tool: Option<&str>,
+    input: Option<serde_json::Value>,
+    output: Option<serde_json::Value>,
+) -> WorkPart {
+    let has_output = output.is_some();
+    WorkPart {
+        seq,
+        occurred_at: None,
+        body: WorkPartBody::Action {
+            id: id.to_string(),
+            actor: WorkActor::Agent,
+            target: WorkTarget::Tool {
+                name: tool.map(str::to_string),
+            },
+            title: None,
+            input: input.map(WorkContent::Json),
+            output: output
+                .map(|value| {
+                    vec![WorkContentBlock {
+                        content: WorkContent::Json(value),
+                        start_line: None,
+                    }]
+                })
+                .unwrap_or_default(),
+            status: if has_output {
+                WorkActionStatus::Completed
+            } else {
+                WorkActionStatus::InProgress
+            },
+            exit_code: None,
+        },
+    }
+}
+
 /// A chat-turn record whose parts the caller builds.
 pub fn chat_record(index: usize, parts: Vec<WorkPart>) -> WorkRecord {
     WorkRecord {
