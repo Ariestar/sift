@@ -33,6 +33,8 @@ pub(crate) enum WorkspaceHelpAction {
     ToggleFullscreen,
     /// Toggle the help overlay.
     ToggleHelp,
+    /// Toggle the diagnostics overlay (full warning history).
+    ToggleDiagnostics,
     OpenSearch,
     /// Esc in the main UI: cancel from Source/Sessions, else step focus left.
     BackOrCancel,
@@ -293,6 +295,13 @@ pub(crate) fn workspace_help_entries() -> &'static [WorkspaceHelpEntry] {
             description: "toggle help",
             action: WorkspaceHelpAction::ToggleHelp,
             footer_label: Some("help"),
+            footer_panes: NAV,
+        },
+        WorkspaceHelpEntry {
+            key: "!",
+            description: "diagnostics log",
+            action: WorkspaceHelpAction::ToggleDiagnostics,
+            footer_label: Some("diag"),
             footer_panes: NAV,
         },
         WorkspaceHelpEntry {

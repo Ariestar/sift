@@ -14,6 +14,26 @@ const COLOR_ALWAYS: u8 = 1;
 const COLOR_NEVER: u8 = 2;
 
 static COLOR_CHOICE: AtomicU8 = AtomicU8::new(COLOR_AUTO);
+static TUI_OWNS_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// While a TUI owns the screen, stderr mirroring of diagnostics is suppressed:
+/// the messages stay in the diagnostics ring buffer for the `!` overlay
+/// instead of corrupting the alternate-screen UI.
+pub fn set_tui_owns_screen(active: bool) {
+    TUI_OWNS_SCREEN.store(active, Ordering::Release);
+}
+
+/// Install the one process-wide diagnostics destination for CLI runs: every
+/// warning mirrors to stderr unless the TUI owns the screen (the TUI shows
+/// the same messages through the `!` overlay). Call once at binary startup,
+/// before any command can warn.
+pub fn install_diagnostics_listener() {
+    sivtr_core::diagnostics::subscribe(Box::new(|message| {
+        if !TUI_OWNS_SCREEN.load(Ordering::Acquire) {
+            labeled("warning", Style::YellowBold, message);
+        }
+    }));
+}
 
 pub fn set_color_choice(choice: ColorChoice) {
     COLOR_CHOICE.store(

@@ -52,6 +52,7 @@ pub(super) fn apply_workspace_help_action(
     content_pane: &mut ContentPane,
     content_blocks: (&[BlockText], &[BlockText]),
     show_help: &mut bool,
+    show_diagnostics: &mut bool,
     show_search: &mut bool,
     search_query: &mut String,
     search_dirty: &mut bool,
@@ -292,8 +293,12 @@ pub(super) fn apply_workspace_help_action(
         WorkspaceHelpAction::ToggleHelp => {
             *show_help = !*show_help;
         }
+        WorkspaceHelpAction::ToggleDiagnostics => {
+            *show_diagnostics = !*show_diagnostics;
+        }
         WorkspaceHelpAction::OpenSearch => {
             *show_help = false;
+            *show_diagnostics = false;
             *show_search = true;
             search_query.clear();
             *search_dirty = true;

@@ -94,11 +94,11 @@ impl AgentSessionProvider for GenericProvider {
             let parsed = match self.parse_session_file(&path) {
                 Ok(parsed) => parsed,
                 Err(error) => {
-                    eprintln!(
-                        "warning: failed to parse {} session {}: {error:#}",
+                    crate::diagnostics::warn(format!(
+                        "failed to parse {} session {}: {error:#}",
                         self.provider.command_name(),
                         path.display()
-                    );
+                    ));
                     continue;
                 }
             };
