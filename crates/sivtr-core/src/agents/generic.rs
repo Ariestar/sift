@@ -89,7 +89,19 @@ impl AgentSessionProvider for GenericProvider {
                 sessions.extend(list_sqlite_sessions(self.provider, &path)?);
                 continue;
             }
-            let parsed = self.parse_session_file(&path)?;
+            // One unreadable file must not drop the provider's whole listing;
+            // warn and keep going (same policy as the jsonl meta reader).
+            let parsed = match self.parse_session_file(&path) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    eprintln!(
+                        "warning: failed to parse {} session {}: {error:#}",
+                        self.provider.command_name(),
+                        path.display()
+                    );
+                    continue;
+                }
+            };
             if parsed.blocks.is_empty() {
                 continue;
             }
@@ -466,8 +478,13 @@ fn list_sqlite_sessions(_provider: AgentProvider, path: &Path) -> Result<Vec<Ses
                 {
                     continue;
                 }
-                let document: Value = serde_json::from_str(&value)
-                    .with_context(|| format!("SQLite ItemTable value `{key}` is not JSON"))?;
+                // Non-JSON values under chat/session keys (telemetry, UI
+                // state) are noise, not corruption: skip them so one odd key
+                // never drops the whole listing.
+                let document: Value = match serde_json::from_str(&value) {
+                    Ok(document) => document,
+                    Err(_) => continue,
+                };
                 let mut metadata = Vec::new();
                 collect_session_metadata(&document, &mut metadata);
                 for (id, title, cwd, updated) in metadata {
@@ -1612,8 +1629,13 @@ fn parse_item_table(
         {
             continue;
         }
-        let document: Value = serde_json::from_str(&value)
-            .with_context(|| format!("SQLite ItemTable value `{key}` is not JSON"))?;
+        // Non-JSON values under chat/session keys (telemetry, UI state) are
+        // noise, not corruption: skip them so one odd key never drops the
+        // whole session.
+        let document: Value = match serde_json::from_str(&value) {
+            Ok(document) => document,
+            Err(_) => continue,
+        };
         if let Some(only_session) = only_session {
             let ids = document_session_ids(&document);
             if !ids.is_empty() && !ids.iter().any(|id| id == only_session) {

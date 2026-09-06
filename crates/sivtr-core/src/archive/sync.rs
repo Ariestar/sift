@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, TryLockError};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -169,17 +170,15 @@ fn sync_sources(
         sources,
         duration_ms: started.elapsed().as_millis() as u64,
     };
-    if report
-        .sources
-        .iter()
-        .all(|source| source.error.is_none() && source.counts.failed == 0)
-    {
-        store::meta_set(
-            conn,
-            "last_sync_at",
-            &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-        )?;
-    }
+    // Stamp unconditionally: freshness is a property of the archive, not of
+    // every provider being perfect. A permanently broken source would
+    // otherwise disable incremental sync for the whole archive and force a
+    // full sweep on every query.
+    store::meta_set(
+        conn,
+        "last_sync_at",
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )?;
     Ok(report)
 }
 
@@ -455,7 +454,27 @@ pub fn ensure_fresh() -> Result<Vec<SkippedSession>> {
 }
 
 /// [`ensure_fresh`] on a caller-owned connection.
+///
+/// One freshness pass at a time per process: concurrent readers (the browse
+/// TUI spawns one loader per source) single-flight on [`FRESH_GATE`]. The
+/// first caller runs the pass; everyone else fails open and reads the
+/// archive as-is (stale-while-revalidate: WAL readers never block, and any
+/// later query re-checks the stamp). Without the gate, N concurrent readers
+/// each run a full sweep and race each other's SQLite writes.
+static FRESH_GATE: Mutex<()> = Mutex::new(());
+
 pub fn ensure_fresh_with_conn(conn: &Connection) -> Result<Vec<SkippedSession>> {
+    let _gate = match FRESH_GATE.try_lock() {
+        Ok(gate) => gate,
+        // Another pass is already running in this process: read the current
+        // archive instead of queuing behind it.
+        Err(TryLockError::WouldBlock) => return Ok(Vec::new()),
+        // A panicked pass leaves the gate poisoned; keep syncing.
+        Err(TryLockError::Poisoned(poison)) => poison.into_inner(),
+    };
+
+    // Re-check the TTL under the gate: a concurrent process may have just
+    // completed a pass, making ours redundant.
     let max_age_secs = sync_max_age_secs()?;
     if max_age_secs > 0 {
         if let Some(last) = store::meta_get(conn, "last_sync_at")? {
@@ -513,6 +532,17 @@ mod tests {
         let last = store::meta_get(&conn, "last_sync_at").unwrap();
         assert!(last.is_some(), "sync stamps last_sync_at");
         std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    /// The gate must fail open: while a pass holds it, concurrent readers get
+    /// an empty skip list and read the archive as-is instead of queuing.
+    #[test]
+    fn ensure_fresh_fails_open_while_a_pass_is_running() {
+        let held = FRESH_GATE.try_lock().expect("gate free in test");
+        let conn = schema::open().unwrap();
+        let skipped = ensure_fresh_with_conn(&conn).unwrap();
+        assert!(skipped.is_empty(), "blocked reader reads as-is");
+        drop(held);
     }
 
     #[test]
