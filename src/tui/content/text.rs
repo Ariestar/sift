@@ -1,6 +1,6 @@
 //! Part → dual Input/Output display text (per-block fold in reading mode).
 
-use sivtr_core::record::{WorkAt, WorkRecord};
+use sivtr_core::record::{Projection, WorkAt, WorkRecord};
 
 use crate::tui::content::block::{dialogue_blocks, render_half};
 use crate::tui::content::io::{ContentIoTexts, ExpandedBlocks};
@@ -19,8 +19,14 @@ pub(crate) fn content_io_from_record(
 ) -> ContentIoTexts {
     let (input_blocks, output_blocks) = dialogue_blocks(record);
     ContentIoTexts::new(
-        render_half(record, &input_blocks, reading, expanded),
-        render_half(record, &output_blocks, reading, expanded),
+        render_half(record, &input_blocks, Projection::Input, reading, expanded),
+        render_half(
+            record,
+            &output_blocks,
+            Projection::Output,
+            reading,
+            expanded,
+        ),
     )
 }
 
@@ -83,49 +89,55 @@ mod tests {
     use super::content_io_from_record;
     use crate::tui::content::io::ExpandedBlocks;
     use sivtr_core::agents::AgentProvider;
-    use sivtr_core::record::{WorkPart, WorkPartData, WorkRecord, WorkRef};
+    use sivtr_core::record::{
+        MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
+        WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
+        WorkTarget, WorkTime,
+    };
 
-    fn tool_part(seq: usize, tool: &str, input: &str) -> WorkPart {
+    fn shell_action(seq: usize, command: &str, output: Option<&str>) -> WorkPart {
+        crate::test_fixtures::shell_action_part(seq, command, output)
+    }
+
+    fn read_action(seq: usize, path: &str) -> WorkPart {
         WorkPart {
             seq,
             occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some(tool.to_string()),
-                input: serde_json::json!({ "command": input }),
+            body: WorkPartBody::Action {
+                id: format!("read-{seq}"),
+                actor: WorkActor::Agent,
+                target: WorkTarget::Tool {
+                    name: Some("Read".to_string()),
+                },
+                title: None,
+                input: Some(WorkContent::Json(serde_json::json!({ "file_path": path }))),
+                output: Vec::new(),
+                status: WorkActionStatus::InProgress,
+                exit_code: None,
             },
         }
     }
 
-    fn tool_result_part(seq: usize, tool: &str, output: &str) -> WorkPart {
-        WorkPart {
-            seq,
-            occurred_at: None,
-            data: WorkPartData::ToolResult {
-                call_id: None,
-                tool: Some(tool.to_string()),
-                output: serde_json::json!({ "stdout": output }),
-                start_line: None,
-            },
-        }
+    fn user_message(seq: usize, content: &str) -> WorkPart {
+        crate::test_fixtures::message_part(seq, MessageRole::User, content)
     }
 
     fn record(parts: Vec<WorkPart>) -> WorkRecord {
         WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, "session", 1),
-            kind: sivtr_core::record::WorkRecordKind::ChatTurn,
-            source: sivtr_core::record::WorkSource {
-                channel: sivtr_core::record::WorkChannel::Chat,
+            kind: WorkRecordKind::ChatTurn,
+            source: WorkSource {
+                channel: WorkChannel::Chat,
                 provider: Some("codex".to_string()),
             },
-            session: sivtr_core::record::WorkSessionRef {
+            session: WorkSessionRef {
                 id: "session".to_string(),
                 canonical_id: None,
                 path: None,
             },
             cwd: None,
-            time: sivtr_core::record::WorkTime::default(),
+            time: WorkTime::default(),
             status: None,
             title: "cmd".to_string(),
             parts,
@@ -134,14 +146,11 @@ mod tests {
 
     #[test]
     fn reading_folds_runs_and_expanding_reveals_member_tags() {
-        let rec = record(vec![
-            tool_part(1, "Bash", "ls"),
-            tool_part(2, "Read", "file"),
-        ]);
+        let rec = record(vec![shell_action(1, "ls", None), read_action(2, "file")]);
         let io = content_io_from_record(&rec, true, &ExpandedBlocks::default());
         let output = &io.output;
-        // The two consecutive tool calls fold into one run tag.
-        assert!(output.contains("<:bash, read:>"));
+        // The two consecutive agent actions fold into one run tag.
+        assert!(output.contains("<:shell, read:>"));
         assert!(!output.contains("ls"));
         assert!(!output.contains("file"));
 
@@ -150,10 +159,9 @@ mod tests {
         let io = content_io_from_record(&rec, true, &expanded);
         let output = &io.output;
         // The run opens to its member tags; bodies stay folded.
-        assert!(output.contains("<:bash: ls:>"));
-        assert!(output.contains("<:tool:Read call:>"));
+        assert!(output.contains("<:shell: ls:>"));
+        assert!(output.contains("<:read: file:>"));
         assert!(!output.contains("$ ls"));
-        assert!(!output.contains("file"));
 
         // Opening a member shows its body.
         expanded.toggle(1);
@@ -163,7 +171,7 @@ mod tests {
 
     #[test]
     fn raw_mode_ignores_expand_state() {
-        let rec = record(vec![tool_part(1, "Bash", "ls")]);
+        let rec = record(vec![shell_action(1, "ls", None)]);
         let mut expanded = ExpandedBlocks::default();
         expanded.toggle(0);
         let io = content_io_from_record(&rec, false, &expanded);
@@ -171,136 +179,125 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_and_result_fold_into_one_run() {
+    fn shell_action_renders_command_then_output() {
+        // One action carries the whole lifecycle: call line and result text
+        // read as one terminal transcript.
+        let rec = record(vec![shell_action(1, "ls", Some("src\ntarget"))]);
+        let io = content_io_from_record(&rec, false, &ExpandedBlocks::default());
+        assert_eq!(io.output, "$ ls\nsrc\ntarget");
+    }
+
+    #[test]
+    fn dialogue_and_human_commands_land_in_the_input_half() {
         let rec = record(vec![
-            tool_part(1, "Bash", "ls"),
-            tool_result_part(2, "Bash", "ok"),
-            tool_part(3, "Read", "file"),
+            user_message(1, "run the build"),
+            WorkPart {
+                seq: 2,
+                occurred_at: None,
+                body: WorkPartBody::Action {
+                    id: "term-1".to_string(),
+                    actor: WorkActor::User,
+                    target: WorkTarget::Shell,
+                    title: None,
+                    input: Some(WorkContent::Text {
+                        content: "cargo build".to_string(),
+                        ansi: None,
+                    }),
+                    output: vec![WorkContentBlock {
+                        content: WorkContent::Text {
+                            content: "compiled".to_string(),
+                            ansi: None,
+                        },
+                        start_line: None,
+                    }],
+                    status: WorkActionStatus::Completed,
+                    exit_code: Some(0),
+                },
+            },
         ]);
-        let io = content_io_from_record(&rec, true, &ExpandedBlocks::default());
-        let output = &io.output;
-        // Collapsed: the call+result pair and the Read call fold into one
-        // run tag; the result payload stays hidden.
-        assert!(output.contains("<:bash, read:>"));
-        assert!(!output.contains("<:tool:Bash result:>"));
-        assert!(!output.contains("ok"));
-        assert!(!output.contains("file"));
-
-        // Expanding the run reveals member tags on adjacent lines (no blank
-        // line between); the result payload stays folded.
-        let mut expanded = ExpandedBlocks::default();
-        expanded.toggle(0);
-        let io = content_io_from_record(&rec, true, &expanded);
-        let output = &io.output;
-        // The call+result pair is one member; its collapsed tag is the call
-        // tag, so the result marker only appears once the member opens.
-        assert!(output.contains("<:bash: ls:>"));
-        assert!(output.contains("<:tool:Read call:>"));
-        assert!(!output.contains("<:tool:Bash result:>"));
-        assert!(!output.contains("ok"));
-        assert!(!output.contains("file"));
-
-        // Opening the result member shows its payload.
-        expanded.toggle(1);
-        let io = content_io_from_record(&rec, true, &expanded);
-        assert!(io.output.contains("ok"));
+        let io = content_io_from_record(&rec, false, &ExpandedBlocks::default());
+        // Input half: the user message and the human command…
+        assert!(io.input.contains("run the build"));
+        assert!(io.input.contains("$ cargo build"));
+        // …and the command's output belongs to the output half.
+        assert!(io.output.contains("compiled"));
     }
 
     #[test]
-    fn fold_label_uses_input_expression_over_description() {
-        let rec = record(vec![WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("Bash".to_string()),
-                input: serde_json::json!({
-                    "command": "git diff",
-                    "description": "Review working tree",
-                }),
-            },
-        }]);
-        let io = content_io_from_record(&rec, true, &ExpandedBlocks::default());
-        // The input expression replaces the description in the tag.
-        assert!(io.output.contains("<:bash: git diff:>"));
-        assert!(!io.output.contains("Review working tree"));
-
-        // A plain tool part still folds to its expression tag.
-        let rec = record(vec![tool_part(1, "Bash", "ls")]);
-        let io = content_io_from_record(&rec, true, &ExpandedBlocks::default());
-        assert!(io.output.contains("<:bash: ls:>"));
-    }
-
-    #[test]
-    fn fold_label_normalizes_multiline_descriptions_to_one_tag_line() {
-        // An unknown tool takes the generic marker path, where the
-        // description lands in the tag.
-        let part = WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("UnknownTool".to_string()),
-                input: serde_json::json!({
-                    "command": "git diff",
-                    "description": "line one\nline two",
-                }),
-            },
+    fn fold_label_uses_the_expression_over_the_context_line() {
+        let mut rec = record(vec![shell_action(1, "git diff", None)]);
+        rec.parts[0].body = WorkPartBody::Action {
+            id: "shell-1".to_string(),
+            actor: WorkActor::Agent,
+            target: WorkTarget::Shell,
+            title: Some("Review working tree".to_string()),
+            input: Some(WorkContent::Text {
+                content: "git diff".to_string(),
+                ansi: None,
+            }),
+            output: Vec::new(),
+            status: WorkActionStatus::InProgress,
+            exit_code: None,
         };
-        let tag = crate::tui::content::block::fold_label_for_part(&part);
+        let io = content_io_from_record(&rec, true, &ExpandedBlocks::default());
+        // The expression replaces the context line in the tag.
+        assert!(io.output.contains("<:shell: git diff:>"));
+        assert!(!io.output.contains("Review working tree"));
+    }
+
+    #[test]
+    fn fold_label_normalizes_multiline_context_to_one_tag_line() {
+        // An unknown tool takes the generic marker path, where the context
+        // line lands in the tag.
+        let mut action = read_action(1, "a.rs");
+        action.body = WorkPartBody::Action {
+            id: "a1".to_string(),
+            actor: WorkActor::Agent,
+            target: WorkTarget::Tool {
+                name: Some("UnknownTool".to_string()),
+            },
+            title: Some("line one\nline two".to_string()),
+            input: Some(WorkContent::Json(
+                serde_json::json!({ "command": "git diff" }),
+            )),
+            output: Vec::new(),
+            status: WorkActionStatus::InProgress,
+            exit_code: None,
+        };
+        let tag = crate::tui::content::block::fold_label_for_part(&action);
         // The tag stays a single line: internal whitespace collapses.
         assert_eq!(tag.lines().count(), 1);
         assert!(tag.contains("line one line two"));
     }
 
     #[test]
-    fn id_less_call_and_result_group_only_for_the_same_tool() {
+    fn separate_call_and_result_parts_stay_two_run_members() {
+        // Pairing happens once, in the core reducer, keyed by the action id.
+        // Parts that reach the TUI unpaired never merge by tool name.
         let rec = record(vec![
-            tool_part(1, "Bash", "ls"),
-            tool_result_part(2, "Read", "ok"),
-        ]);
-        // Different tools without call ids stay separate blocks: the run
-        // keeps the result out of the call's leaf.
-        let blocks = crate::tui::content::block::half_blocks(&rec, false);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].children.len(), 2);
-
-        let rec = record(vec![
-            tool_part(1, "Bash", "ls"),
-            tool_result_part(2, "Bash", "ok"),
-        ]);
-        // The same tool without call ids pairs into one leaf.
-        let blocks = crate::tui::content::block::half_blocks(&rec, false);
-        assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].children.is_empty());
-        assert_eq!(blocks[0].parts, vec![0, 1]);
-    }
-
-    #[test]
-    fn distinct_call_ids_never_group() {
-        let rec = record(vec![
-            WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some("a".to_string()),
-                    tool: Some("Bash".to_string()),
-                    input: serde_json::json!({ "command": "ls" }),
-                },
-            },
+            read_action(1, "a.rs"),
             WorkPart {
                 seq: 2,
                 occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some("b".to_string()),
-                    tool: Some("Bash".to_string()),
-                    output: serde_json::json!({ "stdout": "ok" }),
-                    start_line: None,
+                body: WorkPartBody::Action {
+                    id: "other".to_string(),
+                    actor: WorkActor::Agent,
+                    target: WorkTarget::Tool {
+                        name: Some("Read".to_string()),
+                    },
+                    title: None,
+                    input: None,
+                    output: vec![WorkContentBlock {
+                        content: WorkContent::Json(serde_json::json!("ok")),
+                        start_line: None,
+                    }],
+                    status: WorkActionStatus::Completed,
+                    exit_code: None,
                 },
             },
         ]);
-        // Distinct call ids never merge the result into the call's leaf.
         let blocks = crate::tui::content::block::half_blocks(&rec, false);
+        assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].children.len(), 2);
     }
 }

@@ -44,7 +44,10 @@ fn find_part(record: &WorkRecord, seq: usize) -> Option<&super::model::WorkPart>
 mod tests {
     use super::*;
     use crate::agents::AgentProvider;
-    use crate::record::model::{WorkPart, WorkPartData, WorkRecordKind, WorkTime};
+    use crate::record::model::{
+        MessageRole, WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+    };
+    use crate::test_fixtures::message_part;
 
     #[test]
     fn resolves_records_by_typed_ref() {
@@ -73,7 +76,6 @@ mod tests {
         turn_index: usize,
         combined: &str,
     ) -> WorkRecord {
-        use crate::record::model::{WorkChannel, WorkSessionRef, WorkSource};
         let work_ref = WorkRef::agent(AgentProvider::Pi, session_id, turn_index);
         WorkRecord {
             schema_version: 1,
@@ -92,13 +94,7 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: "title".to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::Assistant {
-                    content: combined.to_string(),
-                },
-            }],
+            parts: vec![message_part(1, MessageRole::Assistant, combined)],
         }
     }
 
@@ -108,7 +104,6 @@ mod tests {
         turn_index: usize,
         text: &str,
     ) -> WorkRecord {
-        use crate::record::model::{WorkChannel, WorkSessionRef, WorkSource};
         let work_ref = WorkRef::terminal(session_id, turn_index);
         WorkRecord {
             schema_version: 1,
@@ -127,14 +122,7 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: "title".to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::Output {
-                    content: text.to_string(),
-                    ansi: None,
-                },
-            }],
+            parts: vec![message_part(1, MessageRole::Assistant, text)],
         }
     }
 }

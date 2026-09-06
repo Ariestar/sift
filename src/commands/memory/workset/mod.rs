@@ -157,7 +157,7 @@ fn validate_selection(reference: &str, set: &WorkSet, selection: &WorkSetSelecti
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };
 
     fn record(index: usize) -> WorkRecord {
@@ -181,13 +181,12 @@ mod tests {
             status: None,
             title: format!("record {index}"),
             parts: (1..=2)
-                .map(|seq| WorkPart {
-                    seq,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Output {
-                        content: format!("record {index} part {seq}"),
-                        ansi: None,
-                    },
+                .map(|seq| {
+                    crate::test_fixtures::message_part(
+                        seq,
+                        MessageRole::Assistant,
+                        &format!("record {index} part {seq}"),
+                    )
                 })
                 .collect(),
         }

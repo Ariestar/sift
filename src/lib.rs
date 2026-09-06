@@ -13,6 +13,9 @@ pub mod remote;
 pub mod server;
 pub mod tui;
 
+#[cfg(test)]
+pub mod test_fixtures;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{

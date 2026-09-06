@@ -219,7 +219,7 @@ impl fmt::Display for WorkSessionMarker {
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, WorkChannel, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };
 
     #[test]
@@ -304,21 +304,15 @@ mod tests {
             status: None,
             title: title.to_string(),
             parts: vec![
-                WorkPart {
-                    seq: 1,
-                    occurred_at: timestamp.map(str::to_string),
-                    data: sivtr_core::record::WorkPartData::User {
-                        content: "user prompt".to_string(),
-                    },
-                },
-                WorkPart {
-                    seq: 1,
-                    occurred_at: timestamp.map(str::to_string),
-                    data: sivtr_core::record::WorkPartData::Assistant {
-                        content: "assistant reply".to_string(),
-                    },
-                },
-            ],
+                crate::test_fixtures::message_part(1, MessageRole::User, "user prompt"),
+                crate::test_fixtures::message_part(1, MessageRole::Assistant, "assistant reply"),
+            ]
+            .into_iter()
+            .map(|mut part| {
+                part.occurred_at = timestamp.map(str::to_string);
+                part
+            })
+            .collect(),
         }
     }
 }

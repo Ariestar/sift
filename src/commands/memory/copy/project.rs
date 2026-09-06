@@ -39,9 +39,22 @@ pub(super) fn project_record(
 }
 
 fn exact_text(record: &WorkRecord, at: WorkAt) -> Result<TextPair> {
-    let plain = record
-        .content_for_at(at)
-        .with_context(|| missing_at_message(&record.work_ref, at))?;
+    let plain = match at {
+        // A part anchor copies the part's rendered body — for an action,
+        // its whole lifecycle (call line and result), exactly as displayed.
+        WorkAt::Part(_) => record
+            .part_for_at(at)
+            .map(|part| {
+                crate::tui::content::tool::part_body_text(
+                    part,
+                    sivtr_core::record::ProjectionSlice::Whole,
+                )
+            })
+            .with_context(|| missing_at_message(&record.work_ref, at))?,
+        WorkAt::Whole => record
+            .content_for_at(at)
+            .with_context(|| missing_at_message(&record.work_ref, at))?,
+    };
     Ok(TextPair {
         ansi: plain.clone(),
         plain,
@@ -119,7 +132,10 @@ mod tests {
             0,
         )
         .unwrap();
-        let text = project_record(&record, Projection::Exact(WorkAt::Part(3)), None).unwrap();
-        assert_eq!(text.plain, "ok");
+        let text = project_record(&record, Projection::Exact(WorkAt::Part(1)), None).unwrap();
+        // One part is the whole shell action: command line (with the prompt
+        // context it ran under) and result — the same transcript the
+        // projections render.
+        assert_eq!(text.plain, "PS C:\\repo> cargo test\nok");
     }
 }

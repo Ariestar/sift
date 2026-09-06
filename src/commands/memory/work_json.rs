@@ -47,7 +47,7 @@ mod tests {
     use super::*;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        WorkPart, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };
 
     #[test]
@@ -84,13 +84,11 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: "title".to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: Some("2026-05-24T12:00:00Z".to_string()),
-                data: sivtr_core::record::WorkPartData::Assistant {
-                    content: "assistant reply".to_string(),
-                },
-            }],
+            parts: vec![crate::test_fixtures::message_part(
+                1,
+                MessageRole::Assistant,
+                "assistant reply",
+            )],
         }
     }
 }

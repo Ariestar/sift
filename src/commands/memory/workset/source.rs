@@ -613,8 +613,7 @@ mod tests {
     use super::{merge_and_apply, resolve_source, split_group_scope, QueryTransport};
     use crate::commands::memory::workset::{QuerySourceResult, WorkSet};
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkSessionRef,
-        WorkSource, WorkTime,
+        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };
     use sivtr_core::search::Filter;
 
@@ -639,13 +638,12 @@ mod tests {
             status: None,
             title: format!("record {index}"),
             parts: (1..=2)
-                .map(|seq| WorkPart {
-                    seq,
-                    occurred_at: None,
-                    data: WorkPartData::Output {
-                        content: format!("record {index} part {seq}"),
-                        ansi: None,
-                    },
+                .map(|seq| {
+                    crate::test_fixtures::message_part(
+                        seq,
+                        MessageRole::Assistant,
+                        &format!("record {index} part {seq}"),
+                    )
                 })
                 .collect(),
         }

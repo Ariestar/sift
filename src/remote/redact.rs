@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use sivtr_core::privacy;
-use sivtr_core::record::{WorkPart, WorkPartData, WorkRecord};
+use sivtr_core::record::{WorkContent, WorkPart, WorkPartBody, WorkRecord, WorkTarget};
 
 pub fn redact_record(record: &WorkRecord) -> Result<WorkRecord> {
     let mut out = record.clone();
@@ -19,38 +19,65 @@ pub fn redact_record(record: &WorkRecord) -> Result<WorkRecord> {
 }
 
 pub fn redact_part(mut part: WorkPart) -> Result<WorkPart> {
-    match &mut part.data {
-        WorkPartData::Prompt { content, ansi } | WorkPartData::Output { content, ansi } => {
-            *content = privacy::redact_text(content)?;
-            if let Some(value) = ansi {
-                *value = privacy::redact_text(value)?;
+    match &mut part.body {
+        WorkPartBody::Message { label, content, .. } => {
+            if let Some(label) = label {
+                *label = privacy::redact_text(label)?;
             }
+            redact_content(content)?;
         }
-        WorkPartData::Command { content }
-        | WorkPartData::User { content }
-        | WorkPartData::Assistant { content }
-        | WorkPartData::Thinking { content }
-        | WorkPartData::Error { content } => *content = privacy::redact_text(content)?,
-        WorkPartData::ToolCall { tool, input, .. } => {
-            if let Some(value) = tool {
-                *value = privacy::redact_text(value)?;
+        WorkPartBody::Action {
+            title,
+            target,
+            input,
+            output,
+            ..
+        } => {
+            if let Some(title) = title {
+                *title = privacy::redact_text(title)?;
             }
-            privacy::redact_json(input)?;
-        }
-        WorkPartData::ToolResult { tool, output, .. } => {
-            if let Some(value) = tool {
-                *value = privacy::redact_text(value)?;
+            redact_target(target)?;
+            if let Some(input) = input {
+                redact_content(input)?;
             }
-            privacy::redact_json(output)?;
-        }
-        WorkPartData::Skill { skill, content } => {
-            if let Some(value) = skill {
-                *value = privacy::redact_text(value)?;
+            for block in output {
+                redact_content(&mut block.content)?;
             }
-            *content = privacy::redact_text(content)?;
         }
     }
     Ok(part)
+}
+
+fn redact_target(target: &mut WorkTarget) -> Result<()> {
+    match target {
+        WorkTarget::Shell => {}
+        WorkTarget::Tool { name } => {
+            if let Some(name) = name {
+                *name = privacy::redact_text(name)?;
+            }
+        }
+        WorkTarget::Agent { name } => {
+            *name = privacy::redact_text(name)?;
+        }
+        WorkTarget::Mcp { server, tool } => {
+            *server = privacy::redact_text(server)?;
+            *tool = privacy::redact_text(tool)?;
+        }
+    }
+    Ok(())
+}
+
+fn redact_content(content: &mut WorkContent) -> Result<()> {
+    match content {
+        WorkContent::Text { content, ansi } => {
+            *content = privacy::redact_text(content)?;
+            if let Some(ansi) = ansi {
+                *ansi = privacy::redact_text(ansi)?;
+            }
+        }
+        WorkContent::Json(value) => privacy::redact_json(value)?,
+    }
+    Ok(())
 }
 
 #[cfg(test)]

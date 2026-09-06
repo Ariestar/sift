@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::privacy;
-use crate::record::{work_atoms, WorkPartKind, WorkRecord, WorkRecordKind, WorkRef};
+use crate::record::{MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef};
 
 pub const PUBLICATION_SCHEMA_VERSION: u32 = 1;
 pub const GRANULAR_PUBLICATION_SCHEMA_VERSION: u32 = 2;
@@ -100,12 +100,12 @@ pub struct PublicConversationV2 {
     pub provider: String,
     pub published_at: String,
     pub expires_at: String,
-    pub items: Vec<PublicConversationAtom>,
+    pub items: Vec<PublicConversationEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PublicConversationAtom {
-    pub kind: PublicAtomKind,
+pub struct PublicConversationEntry {
+    pub kind: PublicEntryKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub parts: Vec<PublicConversationPart>,
@@ -126,7 +126,7 @@ pub struct PublicConversationPart {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum PublicAtomKind {
+pub enum PublicEntryKind {
     User,
     Assistant,
     Tool,
@@ -271,7 +271,7 @@ pub fn create_publication_draft(
     create_record_publication_draft(records, &normalized, policy)
 }
 
-/// Expand selected publication anchors to complete atomic parts.
+/// Expand selected publication anchors to whole parts.
 pub fn expand_publication_anchors(
     records: &[WorkRecord],
     picked: &[WorkRef],
@@ -289,18 +289,15 @@ pub fn expand_publication_anchors(
         let entry = selected
             .entry(record.work_ref.whole().to_string())
             .or_insert_with(|| (record_index, std::collections::BTreeSet::new()));
-        let mut atoms = work_atoms(record, true);
-        atoms.extend(work_atoms(record, false));
-        if let Some(seq) = anchor.part() {
-            let atom = atoms
-                .iter()
-                .find(|atom| atom.part_seqs.contains(&seq))
-                .ok_or_else(|| anyhow::anyhow!("publication anchor `{anchor}` has no atom"))?;
-            entry.1.extend(atom.part_seqs.iter().copied());
-        } else {
-            entry
-                .1
-                .extend(atoms.into_iter().flat_map(|atom| atom.part_seqs));
+        match anchor.part() {
+            Some(seq) => {
+                ensure!(
+                    record.parts.iter().any(|part| part.seq == seq),
+                    "publication anchor `{anchor}` has no part"
+                );
+                entry.1.insert(seq);
+            }
+            None => entry.1.extend(record.parts.iter().map(|part| part.seq)),
         }
     }
 
@@ -421,9 +418,9 @@ fn create_record_publication_draft(
         source_refs.push(record.work_ref.to_string());
 
         for part in &record.parts {
-            let role = match part.kind() {
-                WorkPartKind::User => PublicRole::User,
-                WorkPartKind::Assistant => PublicRole::Assistant,
+            let role = match part.message_role() {
+                Some(MessageRole::User) => PublicRole::User,
+                Some(MessageRole::Assistant) => PublicRole::Assistant,
                 _ => continue,
             };
             let raw = part.text().into_owned();
@@ -498,7 +495,7 @@ fn create_granular_publication_draft(
 ) -> Result<PublicationDraft> {
     ensure!(
         !anchors.is_empty(),
-        "cannot publish an empty atom selection"
+        "cannot publish an empty part selection"
     );
     ensure!(
         anchors.iter().all(|anchor| anchor.part().is_some()),
@@ -550,26 +547,12 @@ fn create_granular_publication_draft(
 
     for (record_index, selected) in ordered_groups {
         let record = &records[record_index];
-        let mut atoms = work_atoms(record, true);
-        atoms.extend(work_atoms(record, false));
-        atoms.sort_by_key(|atom| atom.part_seqs.first().copied().unwrap_or(usize::MAX));
-
-        for atom in atoms {
-            if !atom.part_seqs.iter().any(|seq| selected.contains(seq)) {
+        for part in &record.parts {
+            if !selected.contains(&part.seq) {
                 continue;
             }
-            ensure!(
-                atom.part_seqs.iter().all(|seq| selected.contains(seq)),
-                "publication selection must include complete tool atoms"
-            );
-            ensure!(
-                tool_atom_is_closed(&atom, record),
-                "publication cannot include a tool call without its result"
-            );
-            let atom_kind = public_atom_kind(atom.kind)?;
-
-            let first_seq = *atom.part_seqs.first().expect("atom has a part");
-            let last_seq = *atom.part_seqs.last().expect("atom has a part");
+            let first_seq = part.seq;
+            let item_kind = public_item_kind(part)?;
             let gap_before = match previous.as_ref() {
                 Some((previous_work_index, _, previous_last, _))
                     if *previous_work_index == record.work_ref.index() =>
@@ -605,52 +588,38 @@ fn create_granular_publication_draft(
             };
 
             let mut public_parts = Vec::new();
-            let mut atom_warnings = Vec::new();
-            let mut atom_refs = Vec::with_capacity(atom.part_seqs.len());
-            let mut previous_seq = None;
-            for seq in &atom.part_seqs {
-                let part = record
-                    .part_for_at(crate::record::WorkAt::Part(*seq))
-                    .expect("validated atom part");
-                let (text, report) = privacy::redact_text_with_report(&part.text())?;
-                redaction_count += report.redactions;
-                atom_warnings.extend(report.warnings);
-                if !text.trim().is_empty() {
-                    let part_gap_before = previous_seq
-                        .is_some_and(|start| omitted_between(record, start, *seq, &selected));
-                    public_parts.push(PublicConversationPart {
-                        kind: public_part_kind(part.kind())?,
-                        text,
-                        occurred_at: part
-                            .occurred_at
-                            .clone()
-                            .or_else(|| record.time.primary_at().map(str::to_string)),
-                        gap_before: part_gap_before,
-                    });
-                }
-                atom_refs.push(record.work_ref.with_part(*seq).to_string());
-                previous_seq = Some(*seq);
+            let mut item_warnings = Vec::new();
+            let (text, report) = privacy::redact_text_with_report(&part.text())?;
+            redaction_count += report.redactions;
+            item_warnings.extend(report.warnings);
+            if !text.trim().is_empty() {
+                public_parts.push(PublicConversationPart {
+                    kind: public_part_kind(part)?,
+                    text,
+                    occurred_at: part
+                        .occurred_at
+                        .clone()
+                        .or_else(|| record.time.primary_at().map(str::to_string)),
+                    gap_before: false,
+                });
             }
             if public_parts.is_empty() {
-                add_risks(&mut risk_map, atom_warnings, None);
+                add_risks(&mut risk_map, item_warnings, None);
                 continue;
             }
-            source_refs.extend(atom_refs);
-            let atom_index = items.len() + 1;
-            let first_part = record
-                .part_for_at(crate::record::WorkAt::Part(first_seq))
-                .expect("validated atom part");
-            let label = if let Some(raw_label) = first_part.label() {
+            source_refs.push(record.work_ref.with_part(part.seq).to_string());
+            let item_index = items.len() + 1;
+            let label = if let Some(raw_label) = part.label() {
                 let (redacted, report) = privacy::redact_text_with_report(raw_label)?;
                 redaction_count += report.redactions;
-                atom_warnings.extend(report.warnings);
+                item_warnings.extend(report.warnings);
                 (!redacted.trim().is_empty()).then_some(redacted)
             } else {
                 None
             };
-            add_risks(&mut risk_map, atom_warnings, Some(atom_index));
-            items.push(PublicConversationAtom {
-                kind: atom_kind,
+            add_risks(&mut risk_map, item_warnings, Some(item_index));
+            items.push(PublicConversationEntry {
+                kind: item_kind,
                 label,
                 parts: public_parts,
                 gap_before,
@@ -659,7 +628,7 @@ fn create_granular_publication_draft(
             previous = Some((
                 record.work_ref.index(),
                 record_index,
-                last_seq,
+                part.seq,
                 selected.clone(),
             ));
         }
@@ -720,18 +689,6 @@ fn create_granular_publication_draft(
         risks,
         source_refs,
     })
-}
-
-fn omitted_between(
-    record: &WorkRecord,
-    start: usize,
-    end: usize,
-    selected: &std::collections::BTreeSet<usize>,
-) -> bool {
-    record
-        .parts
-        .iter()
-        .any(|part| part.seq > start && part.seq < end && !selected.contains(&part.seq))
 }
 
 fn omitted_after(
@@ -795,56 +752,37 @@ fn validate_granular_record(
     Ok(())
 }
 
-fn public_atom_kind(kind: WorkPartKind) -> Result<PublicAtomKind> {
-    match kind {
-        WorkPartKind::User => Ok(PublicAtomKind::User),
-        WorkPartKind::Assistant => Ok(PublicAtomKind::Assistant),
-        WorkPartKind::ToolCall => Ok(PublicAtomKind::Tool),
-        WorkPartKind::ToolResult => Ok(PublicAtomKind::Tool),
-        WorkPartKind::Skill => Ok(PublicAtomKind::Skill),
-        WorkPartKind::Thinking => Ok(PublicAtomKind::Thinking),
-        _ => bail!("unsupported granular publication part kind `{kind:?}`"),
+fn public_item_kind(part: &WorkPart) -> Result<PublicEntryKind> {
+    match &part.body {
+        WorkPartBody::Message { role, .. } => match role {
+            MessageRole::User => Ok(PublicEntryKind::User),
+            MessageRole::Assistant => Ok(PublicEntryKind::Assistant),
+            MessageRole::System => Ok(PublicEntryKind::Skill),
+            MessageRole::Reasoning => Ok(PublicEntryKind::Thinking),
+        },
+        WorkPartBody::Action { .. } => Ok(PublicEntryKind::Tool),
     }
 }
 
-fn public_part_kind(kind: WorkPartKind) -> Result<PublicPartKind> {
-    match kind {
-        WorkPartKind::User => Ok(PublicPartKind::User),
-        WorkPartKind::Assistant => Ok(PublicPartKind::Assistant),
-        WorkPartKind::ToolCall => Ok(PublicPartKind::ToolCall),
-        WorkPartKind::ToolResult => Ok(PublicPartKind::ToolResult),
-        WorkPartKind::Skill => Ok(PublicPartKind::Skill),
-        WorkPartKind::Thinking => Ok(PublicPartKind::Thinking),
-        _ => bail!("unsupported granular publication part kind `{kind:?}`"),
+fn public_part_kind(part: &WorkPart) -> Result<PublicPartKind> {
+    match &part.body {
+        WorkPartBody::Message { role, .. } => match role {
+            MessageRole::User => Ok(PublicPartKind::User),
+            MessageRole::Assistant => Ok(PublicPartKind::Assistant),
+            MessageRole::System => Ok(PublicPartKind::Skill),
+            MessageRole::Reasoning => Ok(PublicPartKind::Thinking),
+        },
+        WorkPartBody::Action { .. } => Ok(PublicPartKind::ToolCall),
     }
 }
 
-fn tool_atom_is_closed(atom: &crate::record::WorkAtom, record: &WorkRecord) -> bool {
-    if atom.kind != WorkPartKind::ToolCall && atom.kind != WorkPartKind::ToolResult {
-        return true;
-    }
-    let mut has_call = false;
-    let mut has_result = false;
-    for seq in &atom.part_seqs {
-        match record
-            .part_for_at(crate::record::WorkAt::Part(*seq))
-            .map(|part| part.kind())
-        {
-            Some(WorkPartKind::ToolCall) => has_call = true,
-            Some(WorkPartKind::ToolResult) => has_result = true,
-            _ => {}
-        }
-    }
-    has_call && has_result
-}
-
-fn title_from_public_items(items: &[PublicConversationAtom]) -> String {
+fn title_from_public_items(items: &[PublicConversationEntry]) -> String {
     let preferred = [
-        PublicAtomKind::User,
-        PublicAtomKind::Assistant,
-        PublicAtomKind::Skill,
-        PublicAtomKind::Tool,
-        PublicAtomKind::Thinking,
+        PublicEntryKind::User,
+        PublicEntryKind::Assistant,
+        PublicEntryKind::Skill,
+        PublicEntryKind::Tool,
+        PublicEntryKind::Thinking,
     ];
     for kind in preferred {
         if let Some(text) = items
@@ -889,13 +827,56 @@ fn hex_sha256(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRef, WorkSessionRef, WorkSource,
-        WorkTime,
+        MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
+        WorkPart, WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkSource, WorkTarget,
+        WorkTime, RECORD_SCHEMA_VERSION,
     };
+    use crate::test_fixtures::message_part;
+
+    fn user_part(seq: usize, content: &str) -> WorkPart {
+        message_part(seq, MessageRole::User, content)
+    }
+
+    fn assistant_part(seq: usize, content: &str) -> WorkPart {
+        message_part(seq, MessageRole::Assistant, content)
+    }
+
+    fn shell_part(seq: usize, command: &str, output: &str) -> WorkPart {
+        WorkPart {
+            seq,
+            occurred_at: None,
+            body: WorkPartBody::Action {
+                id: format!("action-{seq}"),
+                actor: WorkActor::Agent,
+                target: WorkTarget::Shell,
+                title: None,
+                input: Some(WorkContent::Text {
+                    content: command.into(),
+                    ansi: None,
+                }),
+                output: (!output.is_empty())
+                    .then(|| WorkContentBlock {
+                        content: WorkContent::Text {
+                            content: output.into(),
+                            ansi: None,
+                        },
+                        start_line: None,
+                    })
+                    .into_iter()
+                    .collect(),
+                status: WorkActionStatus::Completed,
+                exit_code: None,
+            },
+        }
+    }
+
+    fn thinking_part(seq: usize, content: &str) -> WorkPart {
+        message_part(seq, MessageRole::Reasoning, content)
+    }
 
     fn record(index: usize, assistant: &str) -> WorkRecord {
         WorkRecord {
-            schema_version: 3,
+            schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(crate::agents::AgentProvider::Codex, "session", index),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
@@ -911,68 +892,17 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: "Demo".into(),
-            parts: vec![
-                WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: WorkPartData::User {
-                        content: "hello".into(),
-                    },
-                },
-                WorkPart {
-                    seq: 2,
-                    occurred_at: None,
-                    data: WorkPartData::Assistant {
-                        content: assistant.into(),
-                    },
-                },
-            ],
+            parts: vec![user_part(1, "hello"), assistant_part(2, assistant)],
         }
     }
 
     fn granular_record(index: usize) -> WorkRecord {
         let mut record = record(index, "reply");
         record.parts = vec![
-            WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::User {
-                    content: "question".into(),
-                },
-            },
-            WorkPart {
-                seq: 2,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some("call-1".into()),
-                    tool: Some("shell".into()),
-                    input: serde_json::json!({"command": "pwd"}),
-                },
-            },
-            WorkPart {
-                seq: 3,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some("call-1".into()),
-                    tool: Some("shell".into()),
-                    output: serde_json::json!({"stdout": "C:\\secret"}),
-                    start_line: None,
-                },
-            },
-            WorkPart {
-                seq: 4,
-                occurred_at: None,
-                data: WorkPartData::Thinking {
-                    content: "internal reasoning".into(),
-                },
-            },
-            WorkPart {
-                seq: 5,
-                occurred_at: None,
-                data: WorkPartData::Assistant {
-                    content: "reply".into(),
-                },
-            },
+            user_part(1, "question"),
+            shell_part(2, "pwd", "token=sk-abcdefghijklmnop1234"),
+            thinking_part(3, "internal reasoning"),
+            assistant_part(4, "reply"),
         ];
         record
     }
@@ -1073,9 +1003,9 @@ mod tests {
     }
 
     #[test]
-    fn granular_snapshot_keeps_atoms_and_marks_omitted_content() {
+    fn granular_snapshot_keeps_parts_and_marks_omitted_content() {
         let record = granular_record(1);
-        let anchors = [1, 2, 3, 5]
+        let anchors = [1, 2, 4]
             .into_iter()
             .map(|seq| record.work_ref.with_part(seq))
             .collect::<Vec<_>>();
@@ -1086,18 +1016,20 @@ mod tests {
         };
         assert_eq!(snapshot.schema_version, GRANULAR_PUBLICATION_SCHEMA_VERSION);
         assert_eq!(snapshot.items.len(), 3);
-        assert_eq!(snapshot.items[0].kind, PublicAtomKind::User);
-        assert_eq!(snapshot.items[1].kind, PublicAtomKind::Tool);
-        assert_eq!(snapshot.items[1].parts.len(), 2);
-        assert_eq!(snapshot.items[1].label.as_deref(), Some("shell"));
+        assert_eq!(snapshot.items[0].kind, PublicEntryKind::User);
+        assert_eq!(snapshot.items[1].kind, PublicEntryKind::Tool);
+        assert_eq!(snapshot.items[1].parts.len(), 1);
         assert!(snapshot.items[2].gap_before);
         assert_eq!(draft.turn_count(), 1);
         let json = serde_json::to_string(&draft.snapshot).unwrap();
         assert!(!json.contains("work_ref"));
         assert!(!json.contains("session"));
-        assert!(!json.contains("C:\\\\secret"));
+        assert!(!json.contains("sk-abcdefghijklmnop"));
+        assert!(json.contains("[REDACTED]"));
+        // The record cwd is structural context and never enters the snapshot.
+        assert!(!json.contains("C:"));
 
-        let prefix_omitted = [2, 3, 5]
+        let prefix_omitted = [2, 4]
             .into_iter()
             .map(|seq| granular_record(1).work_ref.with_part(seq))
             .collect::<Vec<_>>();
@@ -1133,7 +1065,7 @@ mod tests {
         let first = granular_record(1);
         let selected = granular_record(2);
         let last = granular_record(3);
-        let anchors = [1, 5]
+        let anchors = [1, 4]
             .into_iter()
             .map(|seq| selected.work_ref.with_part(seq))
             .collect::<Vec<_>>();
@@ -1163,7 +1095,7 @@ mod tests {
         assert!(full_snapshot.items[0].gap_before);
         assert_eq!(full.content_sha256, slim.content_sha256);
 
-        let skip_middle = vec![first.work_ref.with_part(1), last.work_ref.with_part(5)];
+        let skip_middle = vec![first.work_ref.with_part(1), last.work_ref.with_part(4)];
         let full_skip =
             create_publication_draft(&[first, selected, last.clone()], &skip_middle, &policy)
                 .unwrap();
@@ -1181,98 +1113,10 @@ mod tests {
     }
 
     #[test]
-    fn granular_snapshot_marks_gaps_inside_interleaved_tool_atoms() {
-        let mut record = granular_record(1);
-        record.parts = vec![
-            WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::User {
-                    content: "run both".into(),
-                },
-            },
-            WorkPart {
-                seq: 2,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some("a".into()),
-                    tool: Some("shell".into()),
-                    input: serde_json::json!({"command": "echo a"}),
-                },
-            },
-            WorkPart {
-                seq: 3,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some("b".into()),
-                    tool: Some("shell".into()),
-                    input: serde_json::json!({"command": "echo b"}),
-                },
-            },
-            WorkPart {
-                seq: 4,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some("a".into()),
-                    tool: Some("shell".into()),
-                    output: serde_json::json!({"stdout": "a"}),
-                    start_line: None,
-                },
-            },
-            WorkPart {
-                seq: 5,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some("b".into()),
-                    tool: Some("shell".into()),
-                    output: serde_json::json!({"stdout": "b"}),
-                    start_line: None,
-                },
-            },
-        ];
-        let anchors = [record.work_ref.with_part(2), record.work_ref.with_part(4)];
-        let draft = create_publication_draft(
-            std::slice::from_ref(&record),
-            &anchors,
-            &PublicationPolicy::default(),
-        )
-        .unwrap();
-        let PublicConversationSnapshot::V2(snapshot) = &draft.snapshot else {
-            panic!("part anchors use the v2 snapshot")
-        };
-        assert_eq!(snapshot.items.len(), 1);
-        assert_eq!(snapshot.items[0].parts.len(), 2);
-        assert!(snapshot.items[0].gap_before);
-        assert!(snapshot.items[0].parts[1].gap_before);
-        assert!(snapshot.items[0].gap_after);
-    }
-
-    #[test]
-    fn granular_snapshot_rejects_unclosed_tool_calls() {
-        let mut record = granular_record(1);
-        record.parts = vec![WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: Some("a".into()),
-                tool: Some("shell".into()),
-                input: serde_json::json!({"command": "ls"}),
-            },
-        }];
-        let anchors = [record.work_ref.with_part(1)];
-        assert!(create_publication_draft(
-            std::slice::from_ref(&record),
-            &anchors,
-            &PublicationPolicy::default()
-        )
-        .is_err());
-    }
-
-    #[test]
     fn granular_snapshot_title_comes_from_selected_public_parts() {
         let mut record = granular_record(1);
         record.title = "secret user prompt".into();
-        let anchors = [record.work_ref.with_part(5)];
+        let anchors = [record.work_ref.with_part(4)];
         let draft = create_publication_draft(
             std::slice::from_ref(&record),
             &anchors,
@@ -1287,39 +1131,9 @@ mod tests {
     }
 
     #[test]
-    fn granular_snapshot_rejects_unsupported_part_kinds() {
-        let mut record = granular_record(1);
-        record.parts = vec![WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: WorkPartData::Command {
-                content: "cargo test".into(),
-            },
-        }];
-        let anchors = [record.work_ref.with_part(1)];
-        let error = create_publication_draft(
-            std::slice::from_ref(&record),
-            &anchors,
-            &PublicationPolicy::default(),
-        )
-        .unwrap_err();
-        assert!(
-            error.to_string().contains("unsupported"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn granular_snapshot_rejects_incomplete_tool_atom_and_mixed_scope() {
+    fn granular_snapshot_rejects_mixed_anchors_and_scopes() {
         let record = granular_record(1);
-        let call_only = [record.work_ref.with_part(2)];
-        assert!(create_publication_draft(
-            std::slice::from_ref(&record),
-            &call_only,
-            &PublicationPolicy::default()
-        )
-        .is_err());
-        let mixed = [record.work_ref.whole(), record.work_ref.with_part(5)];
+        let mixed = [record.work_ref.whole(), record.work_ref.with_part(4)];
         assert!(
             create_publication_draft(&[record], &mixed, &PublicationPolicy::default()).is_err()
         );
