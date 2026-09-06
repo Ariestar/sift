@@ -74,7 +74,7 @@ impl WorkRecordCopyParts {
     }
 }
 
-pub const RECORD_SCHEMA_VERSION: u32 = 5;
+pub const RECORD_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -873,7 +873,7 @@ pub fn chat_turn_ranges(blocks: &[AgentBlock]) -> Vec<(usize, usize)> {
     let mut has_assistant = false;
 
     for (idx, block) in blocks.iter().enumerate() {
-        if block.kind == AgentBlockKind::User && is_real_user_block(block) {
+        if block.kind == AgentBlockKind::User {
             if let Some(start) = start {
                 if has_assistant {
                     ranges.push((start, idx));
@@ -908,33 +908,6 @@ fn user_only_turn_before_trailing_tools(
         .iter()
         .all(|block| block.kind.is_structure())
         .then_some((start, blocks.len()))
-}
-
-pub fn is_real_user_block(block: &AgentBlock) -> bool {
-    if block.kind != AgentBlockKind::User {
-        return false;
-    }
-
-    let text = block.text.trim_start();
-    !is_agent_startup_user_text(text)
-}
-
-fn is_agent_startup_user_text(text: &str) -> bool {
-    let text = text.trim_start();
-    text.starts_with("# AGENTS.md instructions for")
-        || text.starts_with("<environment_context>")
-        || text.starts_with("<turn_aborted>")
-        || text.starts_with("<local-command-caveat>")
-        || text.starts_with("<local-command-stdout>")
-        || text.starts_with("<command-message>")
-        || text.starts_with("<command-name>")
-        || text.starts_with("<command-args>")
-        || text.starts_with("<ide_opened_file>")
-        || text.starts_with("<ide_selection>")
-        || text.starts_with("<system-reminder>")
-        || text.starts_with("<system_reminder>")
-        // Covers plain interrupt and "…for tool use" variants.
-        || text.starts_with("[Request interrupted by user")
 }
 
 fn agent_session_ref_id(id: Option<&str>, path: &Path) -> String {
@@ -1564,6 +1537,7 @@ pub fn format_shell_action(part: &WorkPart, slice: ProjectionSlice) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::push_block;
     use crate::time::parse_timestamp;
     use std::path::PathBuf;
 
@@ -1983,46 +1957,31 @@ mod tests {
 
     #[test]
     fn chat_turn_records_ignore_interrupted_tool_use_noise() {
-        let session = AgentSession {
+        // The interrupted-turn noise is dropped at parse time (push_block
+        // filters scaffolding), so post-parse this is a plain two-turn
+        // session: an empty-scaffold start and a normal continuation.
+        let mut session = AgentSession {
             path: PathBuf::from("claude-session.jsonl"),
             id: Some("abcdef123456".to_string()),
             cwd: Some("D:\\sivtr".to_string()),
             title: None,
-            blocks: vec![
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:00:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "[Request interrupted by user for tool use]".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::Assistant,
-                    timestamp: Some("2026-05-23T12:00:01Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "partial".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:01:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "continue".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::Assistant,
-                    timestamp: Some("2026-05-23T12:02:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "done".to_string(),
-                    start_line: None,
-                },
-            ],
+            blocks: Vec::new(),
         };
+        for (kind, at, text) in [
+            (
+                AgentBlockKind::User,
+                "2026-05-23T12:00:00Z",
+                "[Request interrupted by user for tool use]",
+            ),
+            (AgentBlockKind::Assistant, "2026-05-23T12:00:01Z", "partial"),
+            (AgentBlockKind::User, "2026-05-23T12:01:00Z", "continue"),
+            (AgentBlockKind::Assistant, "2026-05-23T12:02:00Z", "done"),
+        ] {
+            push_block(&mut session, kind, Some(at.to_string()), None, text);
+        }
+
+        // Scaffolding never reaches the block list.
+        assert_eq!(session.blocks.len(), 3);
 
         let records = WorkRecord::chat_turns(AgentProvider::Claude, &session);
         assert_eq!(records.len(), 1);
@@ -2036,54 +1995,41 @@ mod tests {
 
     #[test]
     fn chat_turn_records_ignore_system_and_command_noise() {
-        let session = AgentSession {
+        let mut session = AgentSession {
             path: PathBuf::from("claude-session.jsonl"),
             id: Some("abcdef123456".to_string()),
             cwd: Some("D:\\sivtr".to_string()),
             title: None,
-            blocks: vec![
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:00:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "  <system-reminder>\nhidden\n</system-reminder>".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:00:01Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "<command-args>--foo</command-args>".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:00:02Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "<ide_selection>main.rs</ide_selection>".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::User,
-                    timestamp: Some("2026-05-23T12:01:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "real question".to_string(),
-                    start_line: None,
-                },
-                AgentBlock {
-                    kind: AgentBlockKind::Assistant,
-                    timestamp: Some("2026-05-23T12:02:00Z".to_string()),
-                    label: None,
-                    call_id: None,
-                    text: "answer".to_string(),
-                    start_line: None,
-                },
-            ],
+            blocks: Vec::new(),
         };
+        for (kind, at, text) in [
+            (
+                AgentBlockKind::User,
+                "2026-05-23T12:00:00Z",
+                "  <system-reminder>\nhidden\n</system-reminder>",
+            ),
+            (
+                AgentBlockKind::User,
+                "2026-05-23T12:00:01Z",
+                "<command-args>--foo</command-args>",
+            ),
+            (
+                AgentBlockKind::User,
+                "2026-05-23T12:00:02Z",
+                "<ide_selection>main.rs</ide_selection>",
+            ),
+            (
+                AgentBlockKind::User,
+                "2026-05-23T12:01:00Z",
+                "real question",
+            ),
+            (AgentBlockKind::Assistant, "2026-05-23T12:02:00Z", "answer"),
+        ] {
+            push_block(&mut session, kind, Some(at.to_string()), None, text);
+        }
+
+        // Scaffolding never reaches the block list.
+        assert_eq!(session.blocks.len(), 2);
 
         let records = WorkRecord::chat_turns(AgentProvider::Claude, &session);
         assert_eq!(records.len(), 1);

@@ -631,6 +631,30 @@ mod tests {
     }
 
     #[test]
+    fn skips_injected_user_envelopes_without_meta_flag() {
+        // Background-task notifications arrive as plain user messages with no
+        // isMeta flag; only the text identifies them as machine injections.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>aa05</task-id>\n<output-file>C:\\tmp\\out</output-file>\n</task-notification>"}}
+{"type":"user","message":{"role":"user","content":"<bash-input>cargo test</bash-input>\n<bash-stdout>ok</bash-stdout>"}}
+{"type":"user","message":{"role":"user","content":"<command-name>/review</command-name>\n<command-message>review</command-message>"}}
+{"type":"user","message":{"role":"user","content":"real follow-up"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+"#,
+        )
+        .unwrap();
+
+        let session = ClaudeProvider.parse_session_file(&path).unwrap();
+
+        assert_eq!(session.blocks.len(), 2);
+        assert_eq!(session.blocks[0].text, "real follow-up");
+        assert_eq!(session.blocks[1].text, "done");
+    }
+
+    #[test]
     fn selects_last_claude_turn() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.jsonl");
