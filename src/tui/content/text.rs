@@ -90,9 +90,8 @@ mod tests {
     use crate::tui::content::io::ExpandedBlocks;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
-        WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
-        WorkTarget, WorkTime,
+        MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkPart,
+        WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkTarget, WorkTime,
     };
 
     fn shell_action(seq: usize, command: &str, output: Option<&str>) -> WorkPart {
@@ -126,11 +125,6 @@ mod tests {
         WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, "session", 1),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: "session".to_string(),
                 canonical_id: None,

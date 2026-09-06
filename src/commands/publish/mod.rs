@@ -778,11 +778,6 @@ mod tests {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(sivtr_core::agents::AgentProvider::Codex, session, index),
-            kind: sivtr_core::record::WorkRecordKind::ChatTurn,
-            source: sivtr_core::record::WorkSource {
-                channel: sivtr_core::record::WorkChannel::Chat,
-                provider: Some("codex".into()),
-            },
             session: sivtr_core::record::WorkSessionRef {
                 id: session.into(),
                 canonical_id: None,

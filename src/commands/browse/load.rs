@@ -17,9 +17,7 @@ use crate::pane::{
     keep_keys, MetaNeed, Pane, PaneInput, SlidingPane, StorePhase, Viewport, WindowRow,
     FETCH_CEILING, FETCH_FLOOR,
 };
-use crate::tui::workspace::{
-    SourceLoadMarker, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
-};
+use crate::tui::workspace::{SourceLoadMarker, WorkspaceSession, WorkspaceSource};
 use sivtr_core::agents::AgentProvider;
 use sivtr_core::origin::Reach;
 use sivtr_core::record::WorkRecord;
@@ -663,15 +661,9 @@ pub fn workspace_source_catalog(
             continue;
         }
         let origin = &entry.origin;
-        sources.push(WorkspaceSource::remote(
-            &origin.name,
-            WorkspaceSourceKind::Terminal,
-        ));
+        sources.push(WorkspaceSource::remote(&origin.name, None));
         for provider in providers {
-            sources.push(WorkspaceSource::remote(
-                &origin.name,
-                WorkspaceSourceKind::Agent(*provider),
-            ));
+            sources.push(WorkspaceSource::remote(&origin.name, Some(*provider)));
         }
     }
     Ok(sources)
@@ -769,9 +761,7 @@ fn record_modified(record: &WorkRecord) -> Option<SystemTime> {
 mod tests {
     use super::*;
     use sivtr_core::agents::AgentProvider;
-    use sivtr_core::record::{
-        WorkChannel, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{WorkRecord, WorkRef, WorkSessionRef, WorkTime};
 
     #[test]
     fn sessions_from_records_groups_by_session() {
@@ -1147,11 +1137,6 @@ mod tests {
         WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, session, index),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: session.to_string(),
                 canonical_id: Some(session.to_string()),

@@ -333,8 +333,7 @@ mod tests {
     use crate::tui::workspace::WorkspaceSource;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        MessageRole, WorkActionStatus, WorkChannel, WorkPartBody, WorkRecord, WorkRecordKind,
-        WorkRef, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, WorkActionStatus, WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkTime,
     };
     use sivtr_core::workset::{WorkSelectionAction, WorkSelectionTarget, WorkSet};
 
@@ -342,11 +341,6 @@ mod tests {
         let mut record = WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, "test", index + 1),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: "test".to_string(),
                 canonical_id: Some("test-session-0123456789abcdef".to_string()),

@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::agents::{AgentProvider, AgentSessionProvider};
 use crate::record::{
-    output_blocks_text, WorkAt, WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind,
-    WorkRef, WorkTarget,
+    output_blocks_text, WorkAt, WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRef,
+    WorkTarget,
 };
 use crate::time::parse_timestamp;
 
@@ -748,7 +748,7 @@ fn current_agent_session_id(provider: AgentProvider) -> Option<String> {
 }
 
 fn excluded_session_matches(record: &WorkRecord, excluded_sessions: &HashSet<PathBuf>) -> bool {
-    if excluded_sessions.is_empty() || record.kind != WorkRecordKind::ChatTurn {
+    if excluded_sessions.is_empty() || record.is_terminal() {
         return false;
     }
     record
