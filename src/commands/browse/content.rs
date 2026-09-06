@@ -333,12 +333,12 @@ mod tests {
     use crate::tui::workspace::WorkspaceSource;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
-        WorkSource, WorkTime,
+        MessageRole, WorkActionStatus, WorkChannel, WorkPartBody, WorkRecord, WorkRecordKind,
+        WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };
     use sivtr_core::workset::{WorkSelectionAction, WorkSelectionTarget, WorkSet};
 
-    fn record(title: &str, tool: &str, command: &str, index: usize) -> WorkRecord {
+    fn record(title: &str, command: &str, index: usize) -> WorkRecord {
         let mut record = WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, "test", index + 1),
@@ -356,23 +356,19 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: title.to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::User {
-                    content: "user".to_string(),
-                },
-            }],
+            parts: vec![crate::test_fixtures::message_part(
+                1,
+                MessageRole::User,
+                "user",
+            )],
         };
-        record.parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: Some("c1".to_string()),
-                tool: Some(tool.to_string()),
-                input: serde_json::json!({ "command": command }),
-            },
-        });
+        let mut action = crate::test_fixtures::shell_action_part(index + 1, command, None);
+        action.seq = 2;
+        if let WorkPartBody::Action { id, status, .. } = &mut action.body {
+            *id = format!("shell-{}", index + 1);
+            *status = WorkActionStatus::InProgress;
+        }
+        record.parts.push(action);
         record
     }
 
@@ -386,8 +382,8 @@ mod tests {
 
     #[test]
     fn selected_parts_copy_every_selected_dialogue() {
-        let a = dialogue(record("A", "Bash", "ls", 0));
-        let b = dialogue(record("B", "Bash", "git status", 1));
+        let a = dialogue(record("A", "ls", 0));
+        let b = dialogue(record("B", "git status", 1));
         let dialogues = [a, b];
         let mut selection = WorkSet::new(".", Vec::new());
         for dialogue in &dialogues {
@@ -416,18 +412,16 @@ mod tests {
 
     #[test]
     fn selected_run_parts_are_deduplicated() {
-        let mut base = record("A", "Bash", "ls", 0);
-        // A second consecutive tool call folds both into one run: block 1 is
-        // the run, blocks 2 and 3 its members.
-        base.parts.push(WorkPart {
-            seq: 3,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: Some("c2".to_string()),
-                tool: Some("Bash".to_string()),
-                input: serde_json::json!({ "command": "git status" }),
-            },
-        });
+        let mut base = record("A", "ls", 0);
+        // A second consecutive agent action folds both into one run: block 1
+        // is the run, blocks 2 and 3 its members.
+        let mut second = crate::test_fixtures::shell_action_part(1, "git status", None);
+        second.seq = 3;
+        if let WorkPartBody::Action { id, status, .. } = &mut second.body {
+            *id = "shell-2".to_string();
+            *status = WorkActionStatus::InProgress;
+        }
+        base.parts.push(second);
         let dialogues = [dialogue(base)];
         let mut selection = WorkSet::new(".", Vec::new());
         selection.apply_target(

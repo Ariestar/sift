@@ -344,7 +344,7 @@ fn parse_signed_literal(value: &str, label: &str) -> Result<isize> {
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };
 
     #[test]
@@ -455,29 +455,17 @@ mod tests {
             time: WorkTime::from_components(None, None, None),
             status: None,
             parts: vec![
-                WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Command {
-                        content: format!("cmd {index}"),
-                    },
-                },
-                WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Output {
-                        content: format!("out {index}.1"),
-                        ansi: None,
-                    },
-                },
-                WorkPart {
-                    seq: 2,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Output {
-                        content: format!("out {index}.2"),
-                        ansi: None,
-                    },
-                },
+                crate::test_fixtures::message_part(1, MessageRole::User, &format!("cmd {index}")),
+                crate::test_fixtures::message_part(
+                    1,
+                    MessageRole::Assistant,
+                    &format!("out {index}.1"),
+                ),
+                crate::test_fixtures::message_part(
+                    2,
+                    MessageRole::Assistant,
+                    &format!("out {index}.2"),
+                ),
             ],
         }
     }

@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::record::WorkPartKind;
+use crate::record::{WorkPart, WorkPartBody, WorkPartKind, WorkTarget};
 
 /// Whether search results address whole records or individual parts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -112,37 +112,47 @@ impl fmt::Display for Sort {
     }
 }
 
-/// Part-kind filter for `--kind`. `Tool` matches both tool calls and results.
+/// Part filter for `--kind`. Roles and action targets are predicates over the
+/// two stored part bodies, not additional storage variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PartKind {
-    Prompt,
-    Command,
+    Message,
+    Action,
     User,
     Assistant,
+    Reasoning,
+    System,
+    Shell,
     Tool,
-    ToolCall,
-    ToolResult,
-    Skill,
-    Thinking,
-    Output,
-    Error,
 }
 
 impl PartKind {
-    pub fn matches(self, kind: WorkPartKind) -> bool {
+    pub fn matches(self, part: &WorkPart) -> bool {
+        use crate::record::MessageRole;
         match self {
-            Self::Prompt => kind == WorkPartKind::Prompt,
-            Self::Command => kind == WorkPartKind::Command,
-            Self::User => kind == WorkPartKind::User,
-            Self::Assistant => kind == WorkPartKind::Assistant,
-            Self::Tool => matches!(kind, WorkPartKind::ToolCall | WorkPartKind::ToolResult),
-            Self::ToolCall => kind == WorkPartKind::ToolCall,
-            Self::ToolResult => kind == WorkPartKind::ToolResult,
-            Self::Skill => kind == WorkPartKind::Skill,
-            Self::Thinking => kind == WorkPartKind::Thinking,
-            Self::Output => kind == WorkPartKind::Output,
-            Self::Error => kind == WorkPartKind::Error,
+            Self::Message => part.kind() == WorkPartKind::Message,
+            Self::Action => part.kind() == WorkPartKind::Action,
+            Self::User => part.message_role() == Some(MessageRole::User),
+            Self::Assistant => part.message_role() == Some(MessageRole::Assistant),
+            Self::Reasoning => part.message_role() == Some(MessageRole::Reasoning),
+            Self::System => part.message_role() == Some(MessageRole::System),
+            Self::Shell => matches!(
+                &part.body,
+                WorkPartBody::Action {
+                    target: WorkTarget::Shell,
+                    ..
+                }
+            ),
+            Self::Tool => matches!(
+                &part.body,
+                WorkPartBody::Action {
+                    target: WorkTarget::Tool { .. }
+                        | WorkTarget::Mcp { .. }
+                        | WorkTarget::Agent { .. },
+                    ..
+                }
+            ),
         }
     }
 }
@@ -152,19 +162,16 @@ impl FromStr for PartKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().replace('-', "_").as_str() {
-            "prompt" => Ok(Self::Prompt),
-            "command" | "cmd" => Ok(Self::Command),
+            "message" => Ok(Self::Message),
+            "action" => Ok(Self::Action),
             "user" => Ok(Self::User),
             "assistant" => Ok(Self::Assistant),
+            "reasoning" => Ok(Self::Reasoning),
+            "system" => Ok(Self::System),
+            "shell" => Ok(Self::Shell),
             "tool" => Ok(Self::Tool),
-            "tool_call" | "call" => Ok(Self::ToolCall),
-            "tool_result" | "result" => Ok(Self::ToolResult),
-            "skill" => Ok(Self::Skill),
-            "thinking" | "reason" | "reasoning" => Ok(Self::Thinking),
-            "output" => Ok(Self::Output),
-            "error" => Ok(Self::Error),
             _ => Err(format!(
-                "unknown part kind `{value}`; expected prompt, command, user, assistant, tool, tool_call, tool_result, skill, thinking, output, or error"
+                "unknown part kind `{value}`; expected message, action, user, assistant, reasoning, system, shell, or tool"
             )),
         }
     }
@@ -173,17 +180,14 @@ impl FromStr for PartKind {
 impl fmt::Display for PartKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::Prompt => "prompt",
-            Self::Command => "command",
+            Self::Message => "message",
+            Self::Action => "action",
             Self::User => "user",
             Self::Assistant => "assistant",
+            Self::Reasoning => "reasoning",
+            Self::System => "system",
+            Self::Shell => "shell",
             Self::Tool => "tool",
-            Self::ToolCall => "tool_call",
-            Self::ToolResult => "tool_result",
-            Self::Skill => "skill",
-            Self::Thinking => "thinking",
-            Self::Output => "output",
-            Self::Error => "error",
         })
     }
 }

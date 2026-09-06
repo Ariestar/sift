@@ -8,7 +8,7 @@ use rusqlite::Connection;
 /// Archive schema version. Bump when a release changes the table layout in a
 /// way older rows cannot serve; the store then rebuilds from native sources
 /// on the next sync (the archive is derived state, so a rebuild is safe).
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Path of the archive database (`<data_dir>/archive.db`).
 pub fn db_path() -> PathBuf {
@@ -82,20 +82,29 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             );
         }
         Some(version) if version < SCHEMA_VERSION => {
+            // The archive is a derived store of the source session files, so
+            // a breaking schema change rebuilds it from scratch: the previous
+            // record blobs decode under the old model only. Sessions are
+            // re-archived on the next sync; capture rows from before the
+            // upgrade do not survive (their blobs are model-shaped).
             conn.execute_batch(
-                "DROP INDEX IF EXISTS idx_embedding_active;
-                 DROP INDEX IF EXISTS idx_record_embeddings_generation;
-                 DROP TABLE IF EXISTS record_embeddings;
-                 DROP TABLE IF EXISTS embedding_generations;",
+                "DROP TABLE IF EXISTS record_embeddings;
+                 DROP TABLE IF EXISTS embedding_generations;
+                 DROP TABLE IF EXISTS embedding_state;
+                 DROP TABLE IF EXISTS usage_events;
+                 DROP TABLE IF EXISTS secret_findings;
+                 DROP TABLE IF EXISTS records;
+                 DROP TABLE IF EXISTS sessions;
+                 DROP TABLE IF EXISTS archive_meta;",
             )
-            .context("Failed to replace the embedding index")?;
+            .context("Failed to clear the derived archive for rebuild")?;
             conn.execute_batch(SCHEMA_SQL)
-                .context("Failed to recreate the embedding index")?;
+                .context("Failed to recreate the archive schema")?;
             conn.execute(
-                "UPDATE archive_meta SET value = ?1 WHERE key = 'schema_version'",
+                "INSERT INTO archive_meta (key, value) VALUES ('schema_version', ?1)",
                 [SCHEMA_VERSION],
             )
-            .context("Failed to migrate archive schema version")?;
+            .context("Failed to stamp archive schema version")?;
         }
         Some(_) => {}
     }

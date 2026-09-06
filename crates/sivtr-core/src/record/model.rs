@@ -74,7 +74,7 @@ impl WorkRecordCopyParts {
     }
 }
 
-pub const RECORD_SCHEMA_VERSION: u32 = 3;
+pub const RECORD_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -198,116 +198,159 @@ pub struct WorkStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkPartKind {
-    Prompt,
-    Command,
-    User,
-    Assistant,
-    ToolCall,
-    ToolResult,
-    Skill,
-    Thinking,
-    Output,
-    Error,
+    Message,
+    Action,
 }
 
-impl WorkPartKind {
-    pub fn is_dialogue(self) -> bool {
-        matches!(self, Self::User | Self::Assistant)
+/// One view of a record's parts. Copy, search, show, export, publish, the
+/// TUI, and the web API all consume a projection — none of them branch on
+/// record kind or channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Projection {
+    /// What the user said and did: user messages, human actions.
+    Input,
+    /// What came back: assistant, reasoning, and system messages, agent
+    /// actions, and the output of human actions.
+    Output,
+    /// Shell commands, whoever ran them.
+    Commands,
+    /// Every part in transcript order.
+    Combined,
+}
+
+/// Which slice of a part one projection renders. An action carries its
+/// whole lifecycle, so the input projection shows its command and the
+/// output projection shows its result; messages always render whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionSlice {
+    Whole,
+    Input,
+    Output,
+}
+
+impl Projection {
+    /// The slice a part contributes to this projection. Parts outside the
+    /// projection never reach a consumer, so only included parts are asked.
+    pub fn slice_of(self, part: &WorkPart) -> ProjectionSlice {
+        match (&part.body, self) {
+            (_, Projection::Combined | Projection::Commands) => ProjectionSlice::Whole,
+            (WorkPartBody::Message { .. }, _) => ProjectionSlice::Whole,
+            (WorkPartBody::Action { .. }, Projection::Input) => ProjectionSlice::Input,
+            (WorkPartBody::Action { actor, .. }, Projection::Output) => match actor {
+                // Agent actions read as one flow (call then result); a human
+                // action's command already went to the input view.
+                WorkActor::Agent => ProjectionSlice::Whole,
+                WorkActor::User => ProjectionSlice::Output,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageRole {
+    User,
+    Assistant,
+    System,
+    Reasoning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkActor {
+    User,
+    Agent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkTarget {
+    Shell,
+    Tool { name: Option<String> },
+    Mcp { server: String, tool: String },
+    Agent { name: String },
+}
+
+impl WorkTarget {
+    pub fn label(&self) -> Option<&str> {
+        match self {
+            Self::Shell => None,
+            Self::Tool { name } => name.as_deref(),
+            Self::Agent { name } => Some(name),
+            Self::Mcp { tool, .. } => Some(tool),
+        }
     }
 
-    /// Structural evidence stays in records but is excluded from default content search.
-    pub fn is_structure(self) -> bool {
-        matches!(
-            self,
-            Self::ToolCall | Self::ToolResult | Self::Skill | Self::Thinking
-        )
+    pub fn is_shell(&self) -> bool {
+        matches!(self, Self::Shell)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkActionStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkContent {
+    Text {
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ansi: Option<String>,
+    },
+    Json(serde_json::Value),
+}
+
+impl WorkContent {
+    /// Renderable text of the content: text as-is, JSON compacted.
+    pub fn text(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::Text { content, .. } => std::borrow::Cow::Borrowed(content),
+            Self::Json(value) => json_text(value),
+        }
     }
 
-    pub fn is_input(self) -> bool {
-        matches!(
-            self,
-            Self::Prompt | Self::Command | Self::User | Self::Skill
-        )
-    }
-
-    pub fn is_output(self) -> bool {
-        matches!(
-            self,
-            Self::Assistant
-                | Self::ToolCall
-                | Self::ToolResult
-                | Self::Thinking
-                | Self::Output
-                | Self::Error
-        )
-    }
-
-    /// Map chat-related kinds to agent block kinds for shared formatting.
-    pub fn as_agent_block_kind(self) -> Option<crate::agents::AgentBlockKind> {
-        use crate::agents::AgentBlockKind;
-        Some(match self {
-            Self::User => AgentBlockKind::User,
-            Self::Assistant => AgentBlockKind::Assistant,
-            Self::ToolCall => AgentBlockKind::ToolCall,
-            Self::ToolResult => AgentBlockKind::ToolOutput,
-            Self::Skill => AgentBlockKind::Skill,
-            Self::Thinking => AgentBlockKind::Thinking,
-            Self::Prompt | Self::Command | Self::Output | Self::Error => return None,
-        })
+    fn ansi(&self) -> Option<&str> {
+        match self {
+            Self::Text { ansi, .. } => ansi.as_deref(),
+            Self::Json(_) => None,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkContentBlock {
+    pub content: WorkContent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WorkPartData {
-    Prompt {
-        content: String,
+pub enum WorkPartBody {
+    Message {
+        role: MessageRole,
         #[serde(skip_serializing_if = "Option::is_none")]
-        ansi: Option<String>,
+        label: Option<String>,
+        content: WorkContent,
     },
-    Command {
-        content: String,
-    },
-    User {
-        content: String,
-    },
-    Assistant {
-        content: String,
-    },
-    ToolCall {
+    Action {
+        id: String,
+        actor: WorkActor,
+        target: WorkTarget,
         #[serde(skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
+        title: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        tool: Option<String>,
-        input: serde_json::Value,
-    },
-    ToolResult {
+        input: Option<WorkContent>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        output: Vec<WorkContentBlock>,
+        status: WorkActionStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
-        /// Tool name when the provider included it on the result event.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tool: Option<String>,
-        output: serde_json::Value,
-        /// First file line of a read-result body when the provider numbered
-        /// it (`775→ …`); display shifts the code gutter to real file lines.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        start_line: Option<u64>,
-    },
-    Skill {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        skill: Option<String>,
-        content: String,
-    },
-    Thinking {
-        content: String,
-    },
-    Output {
-        content: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        ansi: Option<String>,
-    },
-    Error {
-        content: String,
+        exit_code: Option<i32>,
     },
 }
 
@@ -317,7 +360,7 @@ pub struct WorkPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub occurred_at: Option<String>,
     #[serde(flatten)]
-    pub data: WorkPartData,
+    pub body: WorkPartBody,
 }
 
 fn tool_value(text: &str) -> serde_json::Value {
@@ -333,51 +376,80 @@ fn json_text(value: &serde_json::Value) -> std::borrow::Cow<'_, str> {
 
 impl WorkPart {
     pub fn kind(&self) -> WorkPartKind {
-        match self.data {
-            WorkPartData::Prompt { .. } => WorkPartKind::Prompt,
-            WorkPartData::Command { .. } => WorkPartKind::Command,
-            WorkPartData::User { .. } => WorkPartKind::User,
-            WorkPartData::Assistant { .. } => WorkPartKind::Assistant,
-            WorkPartData::ToolCall { .. } => WorkPartKind::ToolCall,
-            WorkPartData::ToolResult { .. } => WorkPartKind::ToolResult,
-            WorkPartData::Skill { .. } => WorkPartKind::Skill,
-            WorkPartData::Thinking { .. } => WorkPartKind::Thinking,
-            WorkPartData::Output { .. } => WorkPartKind::Output,
-            WorkPartData::Error { .. } => WorkPartKind::Error,
+        match self.body {
+            WorkPartBody::Message { .. } => WorkPartKind::Message,
+            WorkPartBody::Action { .. } => WorkPartKind::Action,
         }
     }
 
     pub fn text(&self) -> std::borrow::Cow<'_, str> {
-        match &self.data {
-            WorkPartData::Prompt { content, .. }
-            | WorkPartData::Command { content }
-            | WorkPartData::User { content }
-            | WorkPartData::Assistant { content }
-            | WorkPartData::Skill { content, .. }
-            | WorkPartData::Thinking { content }
-            | WorkPartData::Output { content, .. }
-            | WorkPartData::Error { content } => std::borrow::Cow::Borrowed(content),
-            WorkPartData::ToolCall { input, .. } => json_text(input),
-            WorkPartData::ToolResult { output, .. } => json_text(output),
+        match &self.body {
+            WorkPartBody::Message { content, .. } => content.text(),
+            WorkPartBody::Action { input, output, .. } => {
+                let text = output_blocks_text(output);
+                (!text.is_empty())
+                    .then_some(std::borrow::Cow::Owned(text))
+                    .or_else(|| input.as_ref().map(WorkContent::text))
+                    .unwrap_or_default()
+            }
         }
     }
 
     pub fn label(&self) -> Option<&str> {
-        match &self.data {
-            WorkPartData::ToolCall { tool, .. } | WorkPartData::ToolResult { tool, .. } => {
-                tool.as_deref()
-            }
-            WorkPartData::Skill { skill, .. } => skill.as_deref(),
-            _ => None,
+        match &self.body {
+            WorkPartBody::Message { label, .. } => label.as_deref(),
+            WorkPartBody::Action { target, .. } => target.label(),
         }
     }
 
     pub fn ansi(&self) -> Option<&str> {
-        match &self.data {
-            WorkPartData::Prompt { ansi, .. } | WorkPartData::Output { ansi, .. } => {
-                ansi.as_deref()
+        match &self.body {
+            WorkPartBody::Message { content, .. } => content.ansi(),
+            WorkPartBody::Action { output, .. } => {
+                output.iter().find_map(|block| block.content.ansi())
             }
-            _ => None,
+        }
+    }
+
+    pub fn message_role(&self) -> Option<MessageRole> {
+        match self.body {
+            WorkPartBody::Message { role, .. } => Some(role),
+            WorkPartBody::Action { .. } => None,
+        }
+    }
+
+    pub fn is_dialogue(&self) -> bool {
+        matches!(
+            self.message_role(),
+            Some(MessageRole::User | MessageRole::Assistant)
+        )
+    }
+
+    /// Agent-side evidence: agent actions and reasoning/system messages.
+    /// Evidence folds into tags and stays out of dialogue; human content
+    /// (user messages, human actions) reads as body text.
+    pub fn is_structure(&self) -> bool {
+        match &self.body {
+            WorkPartBody::Message { role, .. } => {
+                matches!(role, MessageRole::System | MessageRole::Reasoning)
+            }
+            WorkPartBody::Action { actor, .. } => matches!(actor, WorkActor::Agent),
+        }
+    }
+
+    pub fn is_input(&self) -> bool {
+        match &self.body {
+            WorkPartBody::Message { role, .. } => matches!(role, MessageRole::User),
+            WorkPartBody::Action { actor, .. } => matches!(actor, WorkActor::User),
+        }
+    }
+
+    pub fn is_output(&self) -> bool {
+        match &self.body {
+            WorkPartBody::Message { role, .. } => {
+                matches!(role, MessageRole::Assistant | MessageRole::Reasoning)
+            }
+            WorkPartBody::Action { .. } => true,
         }
     }
 }
@@ -468,12 +540,12 @@ impl WorkRecord {
         let user = join_part_text(
             parts
                 .iter()
-                .filter(|part| matches!(part.kind(), WorkPartKind::User)),
+                .filter(|part| part.message_role() == Some(MessageRole::User)),
         );
         let assistant = join_part_text(
             parts
                 .iter()
-                .filter(|part| matches!(part.kind(), WorkPartKind::Assistant)),
+                .filter(|part| part.message_role() == Some(MessageRole::Assistant)),
         );
         if user.trim().is_empty() && assistant.trim().is_empty() {
             return None;
@@ -533,17 +605,65 @@ impl WorkRecord {
         include_prompt: bool,
         prompt_override: Option<&str>,
     ) -> RecordText {
-        match self.kind {
-            WorkRecordKind::TerminalCommand => terminal_record_text(
-                mode,
-                TerminalTextContext {
-                    parts: &self.parts,
-                    include_prompt,
-                    prompt_override,
-                },
-            ),
-            WorkRecordKind::ChatTurn => chat_record_text(self, mode),
+        let input = self.input_text().unwrap_or_default();
+        let output = self.output_text().unwrap_or_default();
+        match mode {
+            RecordTextMode::Input => {
+                let input = if include_prompt {
+                    let prompt = prompt_override
+                        .map(str::to_string)
+                        .or_else(|| self.terminal_prompt());
+                    prompt
+                        .map(|prompt| render_prompt_override(&prompt, &input))
+                        .unwrap_or(input)
+                } else {
+                    input
+                };
+                RecordText::plain(input)
+            }
+            RecordTextMode::Output => RecordText::plain(output),
+            RecordTextMode::Command => self
+                .parts
+                .iter()
+                .filter_map(action_input)
+                .find(|(target, _)| target.is_shell())
+                .map(|(_, input)| {
+                    let plain = input.text().into_owned();
+                    let ansi = input
+                        .ansi()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| plain.clone());
+                    RecordText::with_ansi(plain, ansi)
+                })
+                .unwrap_or_default(),
+            RecordTextMode::Combined => {
+                let mut plain = String::new();
+                for part in &self.parts {
+                    append_text_segment(&mut plain, &format_work_part(part));
+                }
+                if let Some(prompt) = prompt_override.filter(|_| !input.is_empty()) {
+                    plain = render_prompt_override(prompt, &input);
+                    if !output.is_empty() {
+                        plain.push_str("\n\n");
+                        plain.push_str(&output);
+                    }
+                }
+                RecordText::plain(plain)
+            }
         }
+    }
+
+    /// The prompt line of the record's shell command, when it kept one.
+    fn terminal_prompt(&self) -> Option<String> {
+        self.parts.iter().find_map(|part| match &part.body {
+            WorkPartBody::Action {
+                target: WorkTarget::Shell,
+                title: Some(prompt),
+                input: Some(_),
+                ..
+            } => Some(prompt.clone()),
+            _ => None,
+        })
     }
 
     pub fn copy_parts(&self, include_prompt: bool) -> WorkRecordCopyParts {
@@ -562,29 +682,21 @@ impl WorkRecord {
     }
 
     pub fn input_text(&self) -> Option<String> {
-        match self.kind {
-            WorkRecordKind::TerminalCommand => non_empty(join_part_text(
-                self.parts
-                    .iter()
-                    .filter(|part| matches!(part.kind(), WorkPartKind::Command)),
-            )),
-            WorkRecordKind::ChatTurn => non_empty(join_parts_structured(
-                self.parts.iter().filter(|part| part.kind().is_input()),
-            )),
-        }
+        non_empty(self.projected_text(Projection::Input))
     }
 
     pub fn output_text(&self) -> Option<String> {
-        match self.kind {
-            WorkRecordKind::TerminalCommand => non_empty(join_part_text(
-                self.parts
-                    .iter()
-                    .filter(|part| matches!(part.kind(), WorkPartKind::Output)),
-            )),
-            WorkRecordKind::ChatTurn => non_empty(join_parts_structured(
-                self.parts.iter().filter(|part| part.kind().is_output()),
-            )),
+        non_empty(self.projected_text(Projection::Output))
+    }
+
+    /// The copy text of one projection: whole parts render in their display
+    /// format, the sliced side of an action renders just that side.
+    fn projected_text(&self, projection: Projection) -> String {
+        let mut text = String::new();
+        for part in self.project(projection) {
+            append_text_segment(&mut text, &projected_part_text(part, projection));
         }
+        text
     }
 
     pub fn content_for_at(&self, at: WorkAt) -> Option<String> {
@@ -595,21 +707,8 @@ impl WorkRecord {
     }
 
     fn write_combined_text(&self, text: &mut String) {
-        match self.kind {
-            WorkRecordKind::TerminalCommand => {
-                for part in self.parts.iter().filter(|part| {
-                    matches!(part.kind(), WorkPartKind::Command | WorkPartKind::Output)
-                }) {
-                    append_text_segment(text, &part.text());
-                }
-            }
-            WorkRecordKind::ChatTurn => {
-                for part in &self.parts {
-                    if part.kind().is_dialogue() || part.kind().is_structure() {
-                        append_text_segment(text, &format_work_part(part));
-                    }
-                }
-            }
+        for part in &self.parts {
+            append_text_segment(text, &format_work_part(part));
         }
     }
 
@@ -620,104 +719,75 @@ impl WorkRecord {
         };
         self.parts.iter().find(|part| part.seq == seq)
     }
-}
 
-struct TerminalTextContext<'a> {
-    parts: &'a [WorkPart],
-    include_prompt: bool,
-    prompt_override: Option<&'a str>,
-}
-
-fn terminal_record_text(mode: RecordTextMode, context: TerminalTextContext<'_>) -> RecordText {
-    let prompt_part = first_part(context.parts, WorkPartKind::Prompt);
-    let command_part = first_part(context.parts, WorkPartKind::Command);
-    let output_part = first_part(context.parts, WorkPartKind::Output);
-    let prompt = prompt_part.map(WorkPart::text).unwrap_or_default();
-    let command = command_part.map(WorkPart::text).unwrap_or_default();
-    let output = output_part.map(WorkPart::text).unwrap_or_default();
-    let prompt_ansi = prompt_part.and_then(WorkPart::ansi);
-    let output_ansi = output_part.and_then(WorkPart::ansi);
-
-    match mode {
-        RecordTextMode::Combined => {
-            let input = terminal_input_text(
-                &prompt,
-                &command,
-                prompt_ansi,
-                context.include_prompt,
-                context.prompt_override,
-            );
-            let output_ansi = output_ansi.unwrap_or(output.as_ref()).to_string();
-            RecordText::with_ansi(
-                join_terminal_input_output(&input.plain, &output),
-                join_terminal_input_output(input.rendered(true), &output_ansi),
-            )
-        }
-        RecordTextMode::Input => terminal_input_text(
-            &prompt,
-            &command,
-            prompt_ansi,
-            context.include_prompt,
-            context.prompt_override,
-        ),
-        RecordTextMode::Output => RecordText::with_ansi(
-            output.to_string(),
-            output_ansi.unwrap_or(output.as_ref()).to_string(),
-        ),
-        RecordTextMode::Command => RecordText::plain(command.to_string()),
+    /// The parts one projection includes, in transcript order. An action
+    /// included in both views (a human command: input view and output view)
+    /// carries its whole lifecycle either way; consumers render the slice
+    /// the projection names.
+    pub fn project(&self, projection: Projection) -> Vec<&WorkPart> {
+        self.parts
+            .iter()
+            .filter(|part| {
+                match (&part.body, projection) {
+                    (_, Projection::Combined) => true,
+                    (WorkPartBody::Action { target, .. }, Projection::Commands) => {
+                        target.is_shell()
+                    }
+                    (WorkPartBody::Message { .. }, Projection::Commands) => false,
+                    (WorkPartBody::Message { role, .. }, Projection::Input) => {
+                        matches!(role, MessageRole::User | MessageRole::System)
+                    }
+                    (WorkPartBody::Action { actor, .. }, Projection::Input) => {
+                        matches!(actor, WorkActor::User)
+                    }
+                    (WorkPartBody::Message { role, .. }, Projection::Output) => {
+                        matches!(role, MessageRole::Assistant | MessageRole::Reasoning)
+                    }
+                    (WorkPartBody::Action { actor, output, .. }, Projection::Output) => match actor
+                    {
+                        WorkActor::Agent => true,
+                        // A human action's result belongs to the output view
+                        // once it has one; a command without output is
+                        // input-only.
+                        WorkActor::User => !output.is_empty(),
+                    },
+                }
+            })
+            .collect()
     }
 }
 
-fn first_part(parts: &[WorkPart], kind: WorkPartKind) -> Option<&WorkPart> {
-    parts.iter().find(|part| part.kind() == kind)
-}
-
-fn join_terminal_input_output(input: &str, output: &str) -> String {
-    match (input.is_empty(), output.is_empty()) {
-        (false, false) => format!("{input}\n{output}"),
-        (false, true) => input.to_string(),
-        (true, false) => output.to_string(),
-        (true, true) => String::new(),
+fn action_input(part: &WorkPart) -> Option<(&WorkTarget, &WorkContent)> {
+    match &part.body {
+        WorkPartBody::Action {
+            target,
+            input: Some(input),
+            ..
+        } => Some((target, input)),
+        _ => None,
     }
 }
 
-fn terminal_input_text(
-    prompt: &str,
-    command: &str,
-    prompt_ansi: Option<&str>,
-    include_prompt: bool,
-    prompt_override: Option<&str>,
-) -> RecordText {
-    if !include_prompt {
-        return RecordText::plain(command.to_string());
-    }
-
-    let plain_prompt = render_input(prompt, command);
-    let ansi_prompt = render_input(prompt_ansi.unwrap_or(prompt), command);
-    // The override only rewrites the prompt when there is a command to attach
-    // it to; otherwise both branches fall back to the recorded prompt, keeping
-    // the ANSI rendering intact.
-    let plain = match prompt_override {
-        Some(prompt_override) if !command.is_empty() => {
-            render_prompt_override(prompt_override, command)
-        }
-        _ => plain_prompt,
-    };
-    let ansi = match prompt_override {
-        Some(prompt_override) if !command.is_empty() => {
-            render_prompt_override(prompt_override, command)
-        }
-        _ => ansi_prompt,
-    };
-    RecordText::with_ansi(plain, ansi)
-}
-
-fn render_input(prompt: &str, command: &str) -> String {
-    match (prompt.trim_end().is_empty(), command.is_empty()) {
-        (false, false) => render_prompt_override(prompt, command),
-        (false, true) => prompt.trim_end_matches(['\r', '\n']).to_string(),
-        (true, false) => command.to_string(),
-        (true, true) => String::new(),
+/// The text one part contributes to a projection: whole parts render in
+/// their display format; the sliced side of an action renders just that
+/// side — the command as plain text, the result as its blocks' text.
+fn projected_part_text(part: &WorkPart, projection: Projection) -> String {
+    match projection.slice_of(part) {
+        ProjectionSlice::Whole => format_work_part(part),
+        ProjectionSlice::Input => match &part.body {
+            WorkPartBody::Action {
+                input: Some(input), ..
+            } => input.text().into_owned(),
+            _ => format_work_part(part),
+        },
+        ProjectionSlice::Output => match &part.body {
+            WorkPartBody::Action { output, .. } if !output.is_empty() => output
+                .iter()
+                .map(|block| block.content.text().into_owned())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            _ => format_work_part(part),
+        },
     }
 }
 
@@ -732,16 +802,6 @@ fn render_prompt_override(prompt: &str, command: &str) -> String {
     } else {
         format!("{prompt} {command}")
     }
-}
-
-fn chat_record_text(record: &WorkRecord, mode: RecordTextMode) -> RecordText {
-    let text = match mode {
-        RecordTextMode::Combined => record.combined_text(),
-        RecordTextMode::Input => record.input_text().unwrap_or_default(),
-        RecordTextMode::Output => record.output_text().unwrap_or_default(),
-        RecordTextMode::Command => String::new(),
-    };
-    RecordText::plain(text)
 }
 
 fn selected_block_records(
@@ -952,7 +1012,7 @@ fn title_from_parts(parts: &[WorkPart]) -> String {
     let user = join_part_text(
         parts
             .iter()
-            .filter(|part| matches!(part.kind(), WorkPartKind::User)),
+            .filter(|part| part.message_role() == Some(MessageRole::User)),
     );
     if !user.trim().is_empty() {
         return preview(&user);
@@ -960,7 +1020,7 @@ fn title_from_parts(parts: &[WorkPart]) -> String {
     let assistant = join_part_text(
         parts
             .iter()
-            .filter(|part| matches!(part.kind(), WorkPartKind::Assistant)),
+            .filter(|part| part.message_role() == Some(MessageRole::Assistant)),
     );
     if !assistant.trim().is_empty() {
         return preview(&assistant);
@@ -1000,6 +1060,16 @@ fn append_text_segment(output: &mut String, text: &str) {
     output.push_str(text);
 }
 
+/// Join text segments with blank lines, skipping empty ones — the shared
+/// shape of multi-part record text and multi-block action output.
+pub fn output_blocks_text<'a>(blocks: impl IntoIterator<Item = &'a WorkContentBlock>) -> String {
+    let mut output = String::new();
+    for block in blocks {
+        append_text_segment(&mut output, &block.content.text());
+    }
+    output
+}
+
 fn join_part_text<'a>(parts: impl IntoIterator<Item = &'a WorkPart>) -> String {
     let mut output = String::new();
     for part in parts {
@@ -1013,47 +1083,47 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 fn terminal_parts(entry: &SessionEntry, command: &str, output: &str) -> Vec<WorkPart> {
-    let mut parts = Vec::new();
+    // One shell action carries the whole command lifecycle: the prompt line
+    // is its context (`title`), the command its input, the terminal output
+    // its result. A terminal command and an agent-run shell tool therefore
+    // have the same shape.
     let prompt = entry.prompt.trim_end_matches(['\r', '\n']);
-    if !prompt.trim().is_empty() {
-        parts.push(WorkPart {
-            seq: parts.len() + 1,
-            occurred_at: entry.ended_at.clone(),
-            data: WorkPartData::Prompt {
-                content: prompt.to_string(),
-                ansi: entry.prompt_ansi.clone(),
-            },
-        });
-    }
-    if !command.is_empty() {
-        parts.push(WorkPart {
-            seq: parts.len() + 1,
-            occurred_at: entry.ended_at.clone(),
-            data: WorkPartData::Command {
-                content: command.to_string(),
-            },
-        });
-    }
+    let mut output_blocks = Vec::new();
     if !output.is_empty() {
-        parts.push(WorkPart {
-            seq: parts.len() + 1,
-            occurred_at: entry.ended_at.clone(),
-            data: WorkPartData::Output {
+        output_blocks.push(WorkContentBlock {
+            content: WorkContent::Text {
                 content: output.to_string(),
                 ansi: entry.output_ansi.clone(),
             },
+            start_line: None,
         });
     }
-    parts
+    vec![WorkPart {
+        seq: 1,
+        occurred_at: entry.ended_at.clone(),
+        body: WorkPartBody::Action {
+            id: "shell-1".to_string(),
+            actor: WorkActor::User,
+            target: WorkTarget::Shell,
+            title: (!prompt.trim().is_empty()).then(|| prompt.to_string()),
+            input: (!command.is_empty()).then(|| WorkContent::Text {
+                content: command.to_string(),
+                ansi: None,
+            }),
+            output: output_blocks,
+            status: match entry.exit_code {
+                Some(0) | None => WorkActionStatus::Completed,
+                Some(_) => WorkActionStatus::Failed,
+            },
+            exit_code: entry.exit_code,
+        },
+    }]
 }
 
-fn agent_parts(blocks: &[AgentBlock]) -> Vec<WorkPart> {
+/// Build record parts from parsed agent blocks — the single path from raw
+/// provider events to typed parts (production parsing and test fixtures).
+pub fn agent_parts(blocks: &[AgentBlock]) -> Vec<WorkPart> {
     let mut parts = Vec::new();
-    // Tool name for results that omit it: borrowed from the matching call —
-    // same call id when both carry one, else the nearest preceding call
-    // (the block model's adjacency pairing rule).
-    let mut last_call_name: Option<String> = None;
-    let mut last_call_id: Option<Option<String>> = None;
     for block in blocks {
         let text = block.text.trim();
         if text.is_empty() {
@@ -1068,66 +1138,133 @@ fn agent_parts(blocks: &[AgentBlock]) -> Vec<WorkPart> {
                     TextSegmentKind::Assistant
                 };
                 for segment in split_skill_segments(text, dialogue_kind) {
-                    let data = match segment.kind {
-                        TextSegmentKind::User => WorkPartData::User {
-                            content: segment.text,
+                    let body = match segment.kind {
+                        TextSegmentKind::User => WorkPartBody::Message {
+                            role: MessageRole::User,
+                            label: None,
+                            content: WorkContent::Text {
+                                content: segment.text,
+                                ansi: None,
+                            },
                         },
-                        TextSegmentKind::Assistant => WorkPartData::Assistant {
-                            content: segment.text,
+                        TextSegmentKind::Assistant => WorkPartBody::Message {
+                            role: MessageRole::Assistant,
+                            label: None,
+                            content: WorkContent::Text {
+                                content: segment.text,
+                                ansi: None,
+                            },
                         },
-                        TextSegmentKind::Skill => WorkPartData::Skill {
-                            skill: segment.label,
-                            content: segment.text,
+                        TextSegmentKind::Skill => WorkPartBody::Message {
+                            role: MessageRole::System,
+                            label: segment.label,
+                            content: WorkContent::Text {
+                                content: segment.text,
+                                ansi: None,
+                            },
                         },
                     };
-                    push_agent_part(&mut parts, block.timestamp.clone(), data);
+                    push_agent_part(&mut parts, block.timestamp.clone(), body);
                 }
             }
             AgentBlockKind::ToolCall => {
-                last_call_name = block.label.clone();
-                last_call_id = Some(block.call_id.clone());
-                push_agent_part(
-                    &mut parts,
-                    block.timestamp.clone(),
-                    WorkPartData::ToolCall {
-                        call_id: block.call_id.clone(),
-                        tool: block.label.clone(),
-                        input: tool_value(text),
-                    },
-                );
+                let id = block
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("action-{}", parts.len() + 1));
+                let value = tool_value(text);
+                let body = if block.label.as_deref().is_some_and(shell_tool) {
+                    // Shell tools normalize to the same shape as a terminal
+                    // command: the command text is the input, the tool's
+                    // description the context line.
+                    WorkPartBody::Action {
+                        id,
+                        actor: WorkActor::Agent,
+                        target: WorkTarget::Shell,
+                        title: json_field_str(&value, "description"),
+                        input: Some(shell_command_content(&value)),
+                        output: Vec::new(),
+                        status: WorkActionStatus::InProgress,
+                        exit_code: None,
+                    }
+                } else {
+                    WorkPartBody::Action {
+                        id,
+                        actor: WorkActor::Agent,
+                        target: WorkTarget::Tool {
+                            name: block.label.clone(),
+                        },
+                        title: None,
+                        input: Some(WorkContent::Json(value)),
+                        output: Vec::new(),
+                        status: WorkActionStatus::InProgress,
+                        exit_code: None,
+                    }
+                };
+                push_agent_part(&mut parts, block.timestamp.clone(), body);
             }
             AgentBlockKind::ToolOutput => {
-                let tool = block.label.clone().or_else(|| {
-                    if last_call_id.as_ref() == Some(&block.call_id) {
-                        last_call_name.clone()
-                    } else {
-                        None
+                let id = block
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("action-{}", parts.len() + 1));
+                let value = tool_value(text);
+                let body = if block.label.as_deref().is_some_and(shell_tool) {
+                    let (output, exit_code) = shell_output(&value);
+                    WorkPartBody::Action {
+                        id,
+                        actor: WorkActor::Agent,
+                        target: WorkTarget::Shell,
+                        title: None,
+                        input: None,
+                        output,
+                        status: match exit_code {
+                            Some(0) | None => WorkActionStatus::Completed,
+                            Some(_) => WorkActionStatus::Failed,
+                        },
+                        exit_code,
                     }
-                });
-                push_agent_part(
-                    &mut parts,
-                    block.timestamp.clone(),
-                    WorkPartData::ToolResult {
-                        call_id: block.call_id.clone(),
-                        tool,
-                        output: tool_value(text),
-                        start_line: block.start_line,
-                    },
-                );
+                } else {
+                    WorkPartBody::Action {
+                        id,
+                        actor: WorkActor::Agent,
+                        target: WorkTarget::Tool {
+                            name: block.label.clone(),
+                        },
+                        title: None,
+                        input: None,
+                        output: vec![WorkContentBlock {
+                            content: WorkContent::Json(value),
+                            start_line: block.start_line,
+                        }],
+                        status: WorkActionStatus::Completed,
+                        exit_code: None,
+                    }
+                };
+                push_agent_part(&mut parts, block.timestamp.clone(), body);
             }
             AgentBlockKind::Skill => push_agent_part(
                 &mut parts,
                 block.timestamp.clone(),
-                WorkPartData::Skill {
-                    skill: block.label.clone(),
-                    content: text.to_string(),
+                WorkPartBody::Message {
+                    role: MessageRole::System,
+                    label: block.label.clone(),
+                    content: WorkContent::Text {
+                        content: text.to_string(),
+                        ansi: None,
+                    },
                 },
             ),
             AgentBlockKind::Thinking => push_agent_part(
                 &mut parts,
                 block.timestamp.clone(),
-                WorkPartData::Thinking {
-                    content: text.to_string(),
+                WorkPartBody::Message {
+                    role: MessageRole::Reasoning,
+                    label: None,
+                    content: WorkContent::Text {
+                        content: text.to_string(),
+                        ansi: None,
+                    },
                 },
             ),
         }
@@ -1148,12 +1285,153 @@ struct TextSegment {
     text: String,
 }
 
-fn push_agent_part(parts: &mut Vec<WorkPart>, occurred_at: Option<String>, data: WorkPartData) {
-    parts.push(WorkPart {
-        seq: parts.len() + 1,
-        occurred_at,
-        data,
+/// Append one parsed agent event. An event carrying a stable id folds into
+/// its earlier action part: the input stays, output appends (streaming
+/// chunks), and status, exit code, and context update from the event.
+/// Events without a matching id stand alone — pairing is never guessed by
+/// tool name or adjacency.
+fn push_agent_part(parts: &mut Vec<WorkPart>, occurred_at: Option<String>, body: WorkPartBody) {
+    let index = action_id(&body).and_then(|id| {
+        parts
+            .iter()
+            .rposition(|part| action_id(&part.body) == Some(id))
     });
+    let Some(index) = index else {
+        parts.push(WorkPart {
+            seq: parts.len() + 1,
+            occurred_at,
+            body,
+        });
+        return;
+    };
+    let WorkPartBody::Action {
+        input: event_input,
+        output: event_output,
+        status: event_status,
+        exit_code: event_exit,
+        title: event_title,
+        ..
+    } = body
+    else {
+        unreachable!("matched an action above");
+    };
+    let WorkPartBody::Action {
+        input,
+        output,
+        status,
+        exit_code,
+        title,
+        ..
+    } = &mut parts[index].body
+    else {
+        unreachable!("matched an action above");
+    };
+    if input.is_none() {
+        *input = event_input;
+    }
+    output.extend(event_output);
+    *status = event_status;
+    if event_exit.is_some() {
+        *exit_code = event_exit;
+    }
+    if title.is_none() {
+        *title = event_title;
+    }
+}
+
+/// Stable pairing id of an action body; messages have none.
+fn action_id(body: &WorkPartBody) -> Option<&str> {
+    match body {
+        WorkPartBody::Action { id, .. } => Some(id),
+        WorkPartBody::Message { .. } => None,
+    }
+}
+
+/// Canonical identity of a shell-execution tool: the names providers give
+/// their shell tool. `false` for tools that are not shell execution — those
+/// stay `WorkTarget::Tool`.
+fn shell_tool(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "exec"
+            | "bash"
+            | "shell"
+            | "run_terminal_command"
+            | "shell_command"
+            | "run_command"
+            | "run_command_or_subagent"
+    )
+}
+
+/// A shell call's input as command text: the `command` string field, the
+/// whole value when the provider already sent plain text.
+fn shell_command_content(value: &serde_json::Value) -> WorkContent {
+    let command = value
+        .as_object()
+        .and_then(|object| object.get("command"))
+        .and_then(|command| command.as_str())
+        .or_else(|| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default();
+    WorkContent::Text {
+        content: command.to_string(),
+        ansi: None,
+    }
+}
+
+/// A shell result as output text blocks (`stdout`/`stderr`), plus the exit
+/// code when the provider reported one. Values without the fields keep
+/// their full shape as one text block, so no payload is lost.
+fn shell_output(value: &serde_json::Value) -> (Vec<WorkContentBlock>, Option<i32>) {
+    let object = value.as_object();
+    let exit_code = object
+        .and_then(|object| object.get("exit_code").or_else(|| object.get("exitCode")))
+        .and_then(serde_json::Value::as_i64)
+        .map(|code| code as i32);
+    let text = |key: &str| {
+        object
+            .and_then(|object| object.get(key))
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+    let stdout = text("stdout");
+    let stderr = text("stderr");
+    let mut blocks = Vec::new();
+    if let Some(stdout) = stdout {
+        blocks.push(text_block(stdout));
+    }
+    if let Some(stderr) = stderr {
+        blocks.push(text_block(stderr));
+    }
+    if blocks.is_empty() {
+        let payload = match value.as_str() {
+            Some(text) => text.to_string(),
+            None => value.to_string(),
+        };
+        blocks.push(text_block(payload));
+    }
+    (blocks, exit_code)
+}
+
+fn text_block(content: String) -> WorkContentBlock {
+    WorkContentBlock {
+        content: WorkContent::Text {
+            content,
+            ansi: None,
+        },
+        start_line: None,
+    }
+}
+
+/// One string field of a JSON tool payload, if present and non-empty.
+fn json_field_str(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .as_object()
+        .and_then(|object| object.get(key))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .map(str::to_string)
 }
 
 /// Split dialogue text into plain dialogue + structured skill segments (never drop skills).
@@ -1218,18 +1496,74 @@ fn split_skill_segments(text: &str, dialogue_kind: TextSegmentKind) -> Vec<TextS
 
 pub fn format_work_part(part: &WorkPart) -> String {
     let text = part.text();
-    match part.kind().as_agent_block_kind() {
-        Some(agent_kind) => format_structured_block(agent_kind, part.label(), &text),
-        None => text.into_owned(),
+    match &part.body {
+        WorkPartBody::Message { role, .. } => {
+            let kind = match role {
+                MessageRole::User => AgentBlockKind::User,
+                MessageRole::Assistant => AgentBlockKind::Assistant,
+                MessageRole::System => AgentBlockKind::Skill,
+                MessageRole::Reasoning => AgentBlockKind::Thinking,
+            };
+            format_structured_block(kind, part.label(), &text)
+        }
+        // A shell action reads as the terminal transcript it is — the typed
+        // command line (with its prompt context when kept), then the output.
+        // Other actions keep their tool-evidence markers.
+        WorkPartBody::Action { target, .. } if target.is_shell() => {
+            format_shell_action(part, ProjectionSlice::Whole)
+        }
+        WorkPartBody::Action { output, .. } => {
+            let kind = if output.is_empty() {
+                AgentBlockKind::ToolCall
+            } else {
+                AgentBlockKind::ToolOutput
+            };
+            format_structured_block(kind, part.label(), &text)
+        }
     }
 }
 
-fn join_parts_structured<'a>(parts: impl IntoIterator<Item = &'a WorkPart>) -> String {
-    let mut output = String::new();
-    for part in parts {
-        append_text_segment(&mut output, &format_work_part(part));
+/// Body of a shell action in the projection's slice: the typed command line
+/// (with its prompt context when kept) unless the slice is output-only, then
+/// the result blocks — the terminal transcript it is, whichever source it
+/// came from. Shared by the TUI content pane and text export.
+pub fn format_shell_action(part: &WorkPart, slice: ProjectionSlice) -> String {
+    let WorkPartBody::Action {
+        target,
+        title,
+        input,
+        output,
+        ..
+    } = &part.body
+    else {
+        return String::new();
+    };
+    debug_assert!(target.is_shell(), "format_shell_action on a non-shell part");
+    let mut rendered = String::new();
+    if !matches!(slice, ProjectionSlice::Output) {
+        if let Some(command) = input.as_ref().map(|input| input.text()) {
+            let command = command.trim_end();
+            if !command.is_empty() {
+                rendered.push_str(&match title.as_deref() {
+                    Some(prompt) => render_prompt_override(prompt, command),
+                    None => format!("$ {command}"),
+                });
+            }
+        }
     }
-    output
+    if matches!(slice, ProjectionSlice::Whole | ProjectionSlice::Output) {
+        for block in output {
+            let line = block.content.text().trim_end().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            if !rendered.is_empty() {
+                rendered.push('\n');
+            }
+            rendered.push_str(&line);
+        }
+    }
+    rendered
 }
 
 #[cfg(test)]
@@ -1313,9 +1647,9 @@ mod tests {
         let input = records[0].input_text().unwrap_or_default();
         assert!(input.contains("fix latest terminal error"));
         let output = records[0].output_text().unwrap_or_default();
-        assert!(output.contains("<:tool:bash call:>"));
-        assert!(output.contains("cargo test"));
-        assert!(output.contains("<:tool:bash result:>"));
+        // The bash call and its output are one shell action, rendered as
+        // the command line then the result.
+        assert!(output.contains("$ cargo test"));
         assert!(output.contains("failed"));
         assert_eq!(
             records[0]
@@ -1375,6 +1709,111 @@ mod tests {
         let output = records[0].output_text().unwrap_or_default();
         // The result carries the call's tool name instead of "unknown".
         assert!(output.contains("<:tool:read result:>"));
+    }
+
+    #[test]
+    fn shell_tool_results_merge_into_the_call_and_normalize_to_shell() {
+        let session = AgentSession {
+            path: PathBuf::from("codex-session.jsonl"),
+            id: Some("abcdef123456".to_string()),
+            cwd: Some("D:\\sivtr".to_string()),
+            title: None,
+            blocks: vec![
+                AgentBlock {
+                    kind: AgentBlockKind::User,
+                    timestamp: None,
+                    label: None,
+                    call_id: None,
+                    text: "run it".to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolCall,
+                    timestamp: None,
+                    label: Some("Bash".to_string()),
+                    call_id: Some("c1".to_string()),
+                    text: "{\"command\":\"cargo test\",\"description\":\"run the suite\"}"
+                        .to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolOutput,
+                    timestamp: None,
+                    label: Some("Bash".to_string()),
+                    call_id: Some("c1".to_string()),
+                    text: "{\"stdout\":\"ok\",\"exit_code\":0}".to_string(),
+                    start_line: None,
+                },
+            ],
+        };
+
+        let records = WorkRecord::chat_turns(AgentProvider::Codex, &session);
+        assert_eq!(records.len(), 1);
+        // The call and its result are one shell action with the full
+        // lifecycle; the description is the context line.
+        assert_eq!(records[0].parts.len(), 2);
+        let Some(WorkPartBody::Action {
+            target,
+            title,
+            input,
+            output,
+            status,
+            exit_code,
+            ..
+        }) = records[0].parts.get(1).map(|part| &part.body)
+        else {
+            panic!("tool part is an action");
+        };
+        assert!(target.is_shell());
+        assert_eq!(title.as_deref(), Some("run the suite"));
+        assert_eq!(
+            input.as_ref().map(|input| input.text().into_owned()),
+            Some("cargo test".to_string())
+        );
+        assert_eq!(output.len(), 1);
+        assert_eq!(*status, WorkActionStatus::Completed);
+        assert_eq!(*exit_code, Some(0));
+    }
+
+    #[test]
+    fn results_without_a_stable_id_stay_separate_parts() {
+        // No stable id: no implicit pairing. An id-less call and its output
+        // remain two actions; the reducer never guesses by tool name.
+        let session = AgentSession {
+            path: PathBuf::from("codex-session.jsonl"),
+            id: Some("abcdef123456".to_string()),
+            cwd: Some("D:\\sivtr".to_string()),
+            title: None,
+            blocks: vec![
+                AgentBlock {
+                    kind: AgentBlockKind::User,
+                    timestamp: None,
+                    label: None,
+                    call_id: None,
+                    text: "go".to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolCall,
+                    timestamp: None,
+                    label: Some("Bash".to_string()),
+                    call_id: None,
+                    text: "{\"command\":\"ls\"}".to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolOutput,
+                    timestamp: None,
+                    label: Some("Bash".to_string()),
+                    call_id: None,
+                    text: "{\"stdout\":\"ok\"}".to_string(),
+                    start_line: None,
+                },
+            ],
+        };
+
+        let records = WorkRecord::chat_turns(AgentProvider::Codex, &session);
+        assert_eq!(records[0].parts.len(), 3);
     }
 
     #[test]
@@ -1469,17 +1908,16 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].title, "real task");
-        assert!(
-            records[0]
-                .parts
-                .iter()
-                .any(|part| part.kind() == WorkPartKind::Skill
-                    && part.label() == Some("sivtr-memory"))
-        );
         assert!(records[0]
             .parts
             .iter()
-            .any(|part| part.kind() == WorkPartKind::User && part.text().contains("real task")));
+            .any(|part| part.message_role() == Some(MessageRole::System)
+                && part.label() == Some("sivtr-memory")));
+        assert!(records[0]
+            .parts
+            .iter()
+            .any(|part| part.message_role() == Some(MessageRole::User)
+                && part.text().contains("real task")));
         let input = records[0].input_text().unwrap_or_default();
         assert!(input.contains("<:skill:sivtr-memory:>"));
         assert!(input.contains("long instructions"));

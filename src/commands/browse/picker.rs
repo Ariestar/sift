@@ -335,7 +335,7 @@ pub(crate) fn run(
                     .get(dialogue_idx)
                     .and_then(|dialogue| dialogue.record.as_ref())
                     .and_then(|record| record.part_for_at(matched.at))
-                    .is_none_or(|part| part.kind().is_input());
+                    .is_none_or(|part| part.is_input());
                 search_match_half(input, matched.matched_line)
             });
             if let Some((half, _)) = pending_half {
@@ -1311,6 +1311,55 @@ mod tests {
         serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text))
     }
 
+    use crate::test_fixtures::{message_part, shell_action_part};
+    use sivtr_core::record::{
+        MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkPartBody,
+        WorkTarget,
+    };
+
+    fn assistant_part(seq: usize, content: &str) -> WorkPart {
+        message_part(seq, MessageRole::Assistant, content)
+    }
+
+    /// One agent tool action carrying input and result — the shape the core
+    /// reducer builds once a call's result event arrives.
+    fn tool_action_part(
+        seq: usize,
+        id: &str,
+        tool: Option<&str>,
+        input: Option<serde_json::Value>,
+        output: Option<serde_json::Value>,
+    ) -> WorkPart {
+        let has_output = output.is_some();
+        WorkPart {
+            seq,
+            occurred_at: None,
+            body: WorkPartBody::Action {
+                id: id.to_string(),
+                actor: WorkActor::Agent,
+                target: WorkTarget::Tool {
+                    name: tool.map(str::to_string),
+                },
+                title: None,
+                input: input.map(WorkContent::Json),
+                output: output
+                    .map(|value| {
+                        vec![WorkContentBlock {
+                            content: WorkContent::Json(value),
+                            start_line: None,
+                        }]
+                    })
+                    .unwrap_or_default(),
+                status: if has_output {
+                    WorkActionStatus::Completed
+                } else {
+                    WorkActionStatus::InProgress
+                },
+                exit_code: None,
+            },
+        }
+    }
+
     use super::super::content::{
         handle_line_filter_key, handle_line_filter_paste, workspace_block_parts,
         workspace_dialogue_vim_view, workspace_picked_content_for_copy,
@@ -1335,8 +1384,8 @@ mod tests {
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{WorkAt, WorkRef};
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkSessionRef,
-        WorkSource, WorkTime, RECORD_SCHEMA_VERSION,
+        WorkChannel, WorkPart, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        RECORD_SCHEMA_VERSION,
     };
     use std::time::SystemTime;
 
@@ -1608,41 +1657,31 @@ mod tests {
     #[test]
     fn marked_block_copy_with_real_sized_record_keeps_unmarked_blocks_out() {
         // A dialogue-sized record: user, assistant, then a run of three tool
-        // pairs (output half). Marking one block must copy only its bodies.
+        // actions (output half). Marking one block must copy only its bodies.
         let mut record = workspace_test_record(
             WorkspaceSource::agent(AgentProvider::Codex),
             "cmd",
             "the user question",
             0,
         );
-        record.parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::Assistant {
-                content: "the assistant answer".to_string(),
-            },
-        });
-        for (i, tool) in ["Bash", "Read", "Grep"].iter().enumerate() {
-            record.parts.push(WorkPart {
-                seq: 3 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    input: serde_json::json!({ "command": format!("cmd {i}") }),
-                },
-            });
-            record.parts.push(WorkPart {
-                seq: 4 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    output: serde_json::json!({ "stdout": format!("out {i}") }),
-                    start_line: None,
-                },
-            });
-        }
+        record.parts.push(assistant_part(2, "the assistant answer"));
+        record
+            .parts
+            .push(shell_action_part(3, "cmd 0", Some("out 0")));
+        record.parts.push(tool_action_part(
+            4,
+            "c1",
+            Some("Read"),
+            Some(serde_json::json!({ "file_path": "cmd 1" })),
+            Some(serde_json::json!({ "stdout": "out 1" })),
+        ));
+        record.parts.push(tool_action_part(
+            5,
+            "c2",
+            Some("Grep"),
+            Some(serde_json::json!({ "pattern": "cmd 2" })),
+            Some(serde_json::json!({ "stdout": "out 2" })),
+        ));
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             work_ref: Some(record.work_ref.clone()),
@@ -1687,34 +1726,24 @@ mod tests {
             "the user question",
             0,
         );
-        record.parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::Assistant {
-                content: "the assistant answer".to_string(),
-            },
-        });
-        for (i, tool) in ["Bash", "Read", "Grep"].iter().enumerate() {
-            record.parts.push(WorkPart {
-                seq: 3 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    input: serde_json::json!({ "command": format!("cmd {i}") }),
-                },
-            });
-            record.parts.push(WorkPart {
-                seq: 4 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    output: serde_json::json!({ "stdout": format!("out {i}") }),
-                    start_line: None,
-                },
-            });
-        }
+        record.parts.push(assistant_part(2, "the assistant answer"));
+        record
+            .parts
+            .push(shell_action_part(3, "cmd 0", Some("out 0")));
+        record.parts.push(tool_action_part(
+            4,
+            "c1",
+            Some("Read"),
+            Some(serde_json::json!({ "file_path": "cmd 1" })),
+            Some(serde_json::json!({ "stdout": "out 1" })),
+        ));
+        record.parts.push(tool_action_part(
+            5,
+            "c2",
+            Some("Grep"),
+            Some(serde_json::json!({ "pattern": "cmd 2" })),
+            Some(serde_json::json!({ "stdout": "out 2" })),
+        ));
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             work_ref: Some(record.work_ref.clone()),
@@ -1784,32 +1813,14 @@ mod tests {
             "user question",
             0,
         );
-        record.parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::Assistant {
-                content: "assistant reply".to_string(),
-            },
-        });
-        record.parts.push(WorkPart {
-            seq: 3,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: Some("c1".to_string()),
-                tool: Some("Grep".to_string()),
-                input: serde_json::json!({ "pattern": "fn main" }),
-            },
-        });
-        record.parts.push(WorkPart {
-            seq: 4,
-            occurred_at: None,
-            data: WorkPartData::ToolResult {
-                call_id: Some("c1".to_string()),
-                tool: Some("Grep".to_string()),
-                output: serde_json::json!({ "matches": [{ "file": "a.rs" }] }),
-                start_line: None,
-            },
-        });
+        record.parts.push(assistant_part(2, "assistant reply"));
+        record.parts.push(tool_action_part(
+            3,
+            "c1",
+            Some("Grep"),
+            Some(serde_json::json!({ "pattern": "fn main" })),
+            Some(serde_json::json!({ "matches": [{ "file": "a.rs" }] })),
+        ));
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             work_ref: Some(record.work_ref.clone()),
@@ -1848,25 +1859,18 @@ mod tests {
             0,
         );
         for (i, tool) in ["Grep", "Read"].iter().enumerate() {
-            record.parts.push(WorkPart {
-                seq: 2 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    input: serde_json::json!({ "pattern": format!("pat {i}") }),
-                },
-            });
-            record.parts.push(WorkPart {
-                seq: 3 + 2 * i,
-                occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some(format!("c{i}")),
-                    tool: Some(tool.to_string()),
-                    output: serde_json::json!({ "matches": format!("out {i}") }),
-                    start_line: None,
-                },
-            });
+            let input = if *tool == "Grep" {
+                serde_json::json!({ "pattern": format!("pat {i}") })
+            } else {
+                serde_json::json!({ "file_path": format!("pat {i}") })
+            };
+            record.parts.push(tool_action_part(
+                2 + i,
+                &format!("c{i}"),
+                Some(tool),
+                Some(input),
+                Some(serde_json::json!({ "matches": format!("out {i}") })),
+            ));
         }
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
@@ -1909,25 +1913,7 @@ mod tests {
             "user text",
             0,
         );
-        record.parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: Some("c1".to_string()),
-                tool: Some("Bash".to_string()),
-                input: serde_json::json!({ "command": "ls" }),
-            },
-        });
-        record.parts.push(WorkPart {
-            seq: 3,
-            occurred_at: None,
-            data: WorkPartData::ToolResult {
-                call_id: Some("c1".to_string()),
-                tool: Some("Bash".to_string()),
-                output: serde_json::json!({ "stdout": "ok" }),
-                start_line: None,
-            },
-        });
+        record.parts.push(shell_action_part(2, "ls", Some("ok")));
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             work_ref: Some(record.work_ref.clone()),
@@ -1935,23 +1921,20 @@ mod tests {
         };
         let dialogues = [dialogue.clone()];
 
-        // Cursor on the tool block (output half, id 1 after the input user
-        // block): call + result bodies only.
+        // Cursor on the shell action (output half, id 1 after the input user
+        // block): the whole action — command line and result — is one body.
         let picked = workspace_picked_content_for_cursor_block(&dialogues, 0, 1)
             .unwrap()
             .expect("cursor block copy");
         let units = picked_units(&picked);
-        assert_eq!(units.len(), 2, "call + result bodies");
+        assert_eq!(units.len(), 1, "one action, one body");
         let text = units
             .iter()
             .map(|unit| unit.plain.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("ls"), "tool call body missing: {text}");
-        assert!(
-            text.contains("\"stdout\""),
-            "tool result body missing: {text}"
-        );
+        assert!(text.contains("$ ls"), "command body missing: {text}");
+        assert!(text.contains("ok"), "result body missing: {text}");
         assert!(
             !text.contains("user text"),
             "other input block leaked: {text}"
@@ -2067,8 +2050,13 @@ mod tests {
         );
 
         let mut body_changed = sessions;
-        body_changed[0].records[0].parts[0].data = sivtr_core::record::WorkPartData::User {
-            content: "changed body".into(),
+        body_changed[0].records[0].parts[0].body = WorkPartBody::Message {
+            role: MessageRole::User,
+            label: None,
+            content: WorkContent::Text {
+                content: "changed body".into(),
+                ansi: None,
+            },
         };
         assert_ne!(
             fingerprint,
@@ -2200,15 +2188,13 @@ mod tests {
             "visible text",
             0,
         );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("tool".to_string()),
-                input: tool_test_value("hidden cargo test".to_string()),
-            },
-        }];
+        record.parts = vec![tool_action_part(
+            1,
+            "a1",
+            Some("tool"),
+            Some(tool_test_value("hidden cargo test".to_string())),
+            None,
+        )];
         let sessions = vec![WorkspaceSession {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             session_id: "session".to_string(),
@@ -2240,16 +2226,15 @@ mod tests {
             "visible text",
             0,
         );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolResult {
-                call_id: None,
-                tool: None,
-                output: tool_test_value("first line\nneedle one\nmiddle\nneedle two".to_string()),
-                start_line: None,
-            },
-        }];
+        record.parts = vec![tool_action_part(
+            1,
+            "a1",
+            None,
+            None,
+            Some(tool_test_value(
+                "first line\nneedle one\nmiddle\nneedle two".to_string(),
+            )),
+        )];
         let sessions = vec![WorkspaceSession {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             session_id: "session".to_string(),
@@ -2290,15 +2275,13 @@ mod tests {
             "visible text",
             0,
         );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("tool".to_string()),
-                input: tool_test_value("hidden cargo test".to_string()),
-            },
-        }];
+        record.parts = vec![tool_action_part(
+            1,
+            "a1",
+            Some("tool"),
+            Some(tool_test_value("hidden cargo test".to_string())),
+            None,
+        )];
         let sessions = vec![WorkspaceSession {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             session_id: "session".to_string(),
@@ -2610,15 +2593,13 @@ mod tests {
             "visible text",
             0,
         );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("tool".to_string()),
-                input: tool_test_value("hidden cargo test".to_string()),
-            },
-        }];
+        record.parts = vec![tool_action_part(
+            1,
+            "a1",
+            Some("tool"),
+            Some(tool_test_value("hidden cargo test".to_string())),
+            None,
+        )];
         let dialogues = vec![WorkspaceDialogue {
             source: WorkspaceSource::agent(AgentProvider::Codex),
             work_ref: Some(WorkRef::agent(AgentProvider::Codex, "session", 1)),
@@ -2700,13 +2681,7 @@ mod tests {
             time: WorkTime::default(),
             status: None,
             title: title.to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: sivtr_core::record::WorkPartData::User {
-                    content: plain.to_string(),
-                },
-            }],
+            parts: vec![message_part(1, MessageRole::User, plain)],
         }
     }
 

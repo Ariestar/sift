@@ -239,11 +239,11 @@ fn print_snapshot_items(snapshot: &PublicConversationSnapshot) {
                     .map(|label| format!(" ({label})"))
                     .unwrap_or_default();
                 let kind = match item.kind {
-                    sivtr_core::publication::PublicAtomKind::User => "用户",
-                    sivtr_core::publication::PublicAtomKind::Assistant => "助手",
-                    sivtr_core::publication::PublicAtomKind::Tool => "工具",
-                    sivtr_core::publication::PublicAtomKind::Skill => "技能",
-                    sivtr_core::publication::PublicAtomKind::Thinking => "思考",
+                    sivtr_core::publication::PublicEntryKind::User => "用户",
+                    sivtr_core::publication::PublicEntryKind::Assistant => "助手",
+                    sivtr_core::publication::PublicEntryKind::Tool => "工具",
+                    sivtr_core::publication::PublicEntryKind::Skill => "技能",
+                    sivtr_core::publication::PublicEntryKind::Thinking => "思考",
                 };
                 println!("[{kind}{label}]");
                 for part in &item.parts {
@@ -639,7 +639,9 @@ mod tests {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use chrono::{DateTime, Utc};
     use rusqlite::Connection;
-    use sivtr_core::record::{WorkRecord, WorkRef};
+
+    use crate::test_fixtures::message_part;
+    use sivtr_core::record::{WorkRecord, WorkRef, RECORD_SCHEMA_VERSION};
 
     #[test]
     fn envelope_has_publication_header_and_aad_is_id_bound() {
@@ -774,7 +776,7 @@ mod tests {
 
     fn chat_turn(session: &str, index: usize, thinking: &str, tool_out: &str) -> WorkRecord {
         WorkRecord {
-            schema_version: 3,
+            schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(sivtr_core::agents::AgentProvider::Codex, session, index),
             kind: sivtr_core::record::WorkRecordKind::ChatTurn,
             source: sivtr_core::record::WorkSource {
@@ -791,46 +793,32 @@ mod tests {
             status: None,
             title: "Demo".into(),
             parts: vec![
-                sivtr_core::record::WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::User {
-                        content: "question".into(),
-                    },
-                },
+                message_part(1, sivtr_core::record::MessageRole::User, "question"),
                 sivtr_core::record::WorkPart {
                     seq: 2,
                     occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::ToolCall {
-                        call_id: Some("c1".into()),
-                        tool: Some("Bash".into()),
-                        input: serde_json::json!({"command": "ls"}),
+                    body: sivtr_core::record::WorkPartBody::Action {
+                        id: "shell-2".into(),
+                        actor: sivtr_core::record::WorkActor::Agent,
+                        target: sivtr_core::record::WorkTarget::Shell,
+                        title: None,
+                        input: Some(sivtr_core::record::WorkContent::Text {
+                            content: "ls".into(),
+                            ansi: None,
+                        }),
+                        output: vec![sivtr_core::record::WorkContentBlock {
+                            content: sivtr_core::record::WorkContent::Text {
+                                content: tool_out.into(),
+                                ansi: None,
+                            },
+                            start_line: None,
+                        }],
+                        status: sivtr_core::record::WorkActionStatus::Completed,
+                        exit_code: None,
                     },
                 },
-                sivtr_core::record::WorkPart {
-                    seq: 3,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::ToolResult {
-                        call_id: Some("c1".into()),
-                        tool: Some("Bash".into()),
-                        output: serde_json::json!({"stdout": tool_out}),
-                        start_line: None,
-                    },
-                },
-                sivtr_core::record::WorkPart {
-                    seq: 4,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Thinking {
-                        content: thinking.into(),
-                    },
-                },
-                sivtr_core::record::WorkPart {
-                    seq: 5,
-                    occurred_at: None,
-                    data: sivtr_core::record::WorkPartData::Assistant {
-                        content: "reply".into(),
-                    },
-                },
+                message_part(3, sivtr_core::record::MessageRole::Reasoning, thinking),
+                message_part(4, sivtr_core::record::MessageRole::Assistant, "reply"),
             ],
         }
     }
@@ -850,14 +838,14 @@ mod tests {
             &[record.work_ref.whole()],
         )
         .unwrap();
-        assert_eq!(seqs(&whole), vec![1, 2, 3, 4, 5]);
+        assert_eq!(seqs(&whole), vec![1, 2, 3, 4]);
 
-        let tool_pair = sivtr_core::publication::expand_publication_anchors(
+        let tool_part = sivtr_core::publication::expand_publication_anchors(
             std::slice::from_ref(&record),
             &[record.work_ref.with_part(2)],
         )
         .unwrap();
-        assert_eq!(seqs(&tool_pair), vec![2, 3]);
+        assert_eq!(seqs(&tool_part), vec![2]);
 
         let input_half = sivtr_core::publication::expand_publication_anchors(
             std::slice::from_ref(&record),
@@ -881,7 +869,7 @@ mod tests {
         let last = chat_turn("session", 3, "secret-think", "SECRET_TURN3");
         let anchors = vec![
             selected.work_ref.with_part(1),
-            selected.work_ref.with_part(5),
+            selected.work_ref.with_part(4),
         ];
         let set = workset::WorkSet::from_parts(
             ".",
@@ -937,7 +925,7 @@ mod tests {
             std::slice::from_ref(&v1_record),
             &[
                 v1_record.work_ref.with_part(1),
-                v1_record.work_ref.with_part(5),
+                v1_record.work_ref.with_part(4),
             ],
             &PublicationPolicy::default(),
         )

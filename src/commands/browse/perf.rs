@@ -271,8 +271,7 @@ pub struct FatLayout {
 
 impl FatLayout {
     pub fn new(n_blocks: usize, lines_per: usize) -> Self {
-        use crate::tui::content::block::BlockText;
-        use sivtr_core::record::WorkPartKind;
+        use crate::tui::content::block::{BlockRole, BlockText};
 
         let blocks: Vec<BlockText> = (0..n_blocks)
             .map(|i| {
@@ -286,7 +285,7 @@ impl FatLayout {
                     id: i,
                     text,
                     tight: false,
-                    kind: WorkPartKind::Assistant,
+                    role: BlockRole::Assistant,
                 }
             })
             .collect();
