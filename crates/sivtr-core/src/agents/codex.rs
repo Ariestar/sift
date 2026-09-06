@@ -331,7 +331,9 @@ fn find_current_thread_session() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::CodexProvider;
-    use crate::agents::{select_blocks, AgentBlockKind, AgentSelection, AgentSessionProvider};
+    use crate::agents::{
+        select_blocks, AgentBlockKind, AgentProvider, AgentSelection, AgentSessionProvider,
+    };
     use serde_json::json;
     use std::{env, time::Duration};
 
@@ -390,6 +392,43 @@ mod tests {
         assert_eq!(session.blocks[2].kind, AgentBlockKind::ToolOutput);
         assert_eq!(session.blocks[2].call_id.as_deref(), Some("call_1"));
         assert_eq!(session.blocks[2].text, "Patch applied");
+    }
+
+    #[test]
+    fn filters_injected_user_envelopes_and_keeps_skill_wrapper() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc","cwd":"C:\\repo"}}
+{"timestamp":"2026-04-27T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">\n<objective>ship it</objective>\n</codex_internal_context>"}]}}
+{"timestamp":"2026-04-27T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted/>"}]}}
+{"timestamp":"2026-04-27T00:00:03Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<image>"}]}}
+{"timestamp":"2026-04-27T00:00:04Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<image name=\"[Image #1]\">"}]}}
+{"timestamp":"2026-04-27T00:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<subagent_notification>\n<task-id>1</task-id>\n</subagent_notification>"}]}}
+{"timestamp":"2026-04-27T00:00:06Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_action>scrolled</user_action>"}]}}
+{"timestamp":"2026-04-27T00:00:07Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<skill>\n<name>skill-installer</name>\n<path>C:\\skills\\SKILL.md</path>\n---\nbody text\n</skill>"}]}}
+{"timestamp":"2026-04-27T00:00:08Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"real question"}]}}
+{"timestamp":"2026-04-27T00:00:09Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
+"#,
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        // Injected envelopes never become dialogue; the bare `<skill>` wrapper
+        // becomes a labeled skill block.
+        assert_eq!(session.blocks.len(), 3);
+        assert_eq!(session.blocks[0].kind, AgentBlockKind::Skill);
+        assert_eq!(session.blocks[0].label.as_deref(), Some("skill-installer"));
+        assert!(session.blocks[0].text.starts_with("---\nbody text"));
+        assert!(!session.blocks[0].text.contains("SKILL.md"));
+        assert_eq!(session.blocks[1].text, "real question");
+        assert_eq!(session.blocks[2].text, "answer");
+
+        let records = crate::record::WorkRecord::chat_turns(AgentProvider::Codex, &session);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].input_text().as_deref(), Some("real question"));
     }
 
     #[test]

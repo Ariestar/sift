@@ -8,7 +8,7 @@ use rusqlite::Connection;
 /// Archive schema version. Bump when a release changes the table layout in a
 /// way older rows cannot serve; the store then rebuilds from native sources
 /// on the next sync (the archive is derived state, so a rebuild is safe).
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Path of the archive database (`<data_dir>/archive.db`).
 pub fn db_path() -> PathBuf {
