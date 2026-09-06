@@ -201,10 +201,10 @@ fn collect_recent_sessions(
                     meta,
                     wanted.as_ref(),
                 ),
-                Err(error) => eprintln!(
-                    "warning: failed to parse agent session metadata {}: {error:#}",
+                Err(error) => crate::diagnostics::warn(format!(
+                    "failed to parse agent session metadata {}: {error:#}",
                     path.display()
-                ),
+                )),
             }
             continue;
         };
@@ -233,10 +233,10 @@ fn collect_recent_sessions(
                         meta
                     }
                     Err(error) => {
-                        eprintln!(
-                            "warning: failed to parse agent session metadata {}: {error:#}",
+                        crate::diagnostics::warn(format!(
+                            "failed to parse agent session metadata {}: {error:#}",
                             path.display()
-                        );
+                        ));
                         continue;
                     }
                 }

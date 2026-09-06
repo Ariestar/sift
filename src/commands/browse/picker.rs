@@ -115,6 +115,8 @@ pub(crate) fn run(
     // the first drag, so a pure click never shows a selection flash.
     let mut mouse_down_select: Option<MouseSelectionStart> = None;
     let mut show_help = false;
+    let mut show_diagnostics = false;
+    let mut diagnostics_state = ListState::default();
     let mut publish_overlay: Option<PublishOverlay> = None;
     let mut publish_error: Option<String> = None;
     let mut show_search = false;
@@ -430,6 +432,9 @@ pub(crate) fn run(
                 })
                 .collect();
             terminal.draw(|frame| {
+                // Snapshot at paint: the overlay shows warnings that landed
+                // while it was open (loads run in background threads).
+                let diagnostics_log = show_diagnostics.then(sivtr_core::diagnostics::log);
                 render_workspace(
                     frame,
                     WorkspaceView {
@@ -449,6 +454,9 @@ pub(crate) fn run(
                         content_at: active_content_at,
                         show_help,
                         help_state: &help_state,
+                        diagnostics: diagnostics_log
+                            .as_deref()
+                            .map(|log| (&diagnostics_state, log)),
                         search: (show_search || search_has_query).then_some(WorkspaceSearchView {
                             query: &search_query,
                             scope: workspace_search_query(&search_query).0,
@@ -754,6 +762,26 @@ pub(crate) fn run(
                         }
                         _ => continue,
                     }
+                } else if show_diagnostics {
+                    match key.code {
+                        KeyCode::Char('!') | KeyCode::Esc => {
+                            show_diagnostics = false;
+                            continue;
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            let next = selected_index(&diagnostics_state).saturating_sub(1);
+                            diagnostics_state.select(Some(next));
+                            continue;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            let log_len = sivtr_core::diagnostics::log().len();
+                            let current = selected_index(&diagnostics_state);
+                            let next = (current + 1).min(log_len.saturating_sub(1));
+                            diagnostics_state.select(Some(next));
+                            continue;
+                        }
+                        _ => continue,
+                    }
                 } else {
                     if handle_line_filter_key(
                         key.code,
@@ -857,6 +885,7 @@ pub(crate) fn run(
                         &mut content_pane,
                         content_frame.texts.block_slices(),
                         &mut show_help,
+                        &mut show_diagnostics,
                         &mut show_search,
                         &mut search_query,
                         &mut search_dirty,
@@ -937,6 +966,23 @@ pub(crate) fn run(
                     for _ in 0..MOUSE_SCROLL_LINES {
                         let next = (selected_index(&help_state) + 1).min(len.saturating_sub(1));
                         help_state.select((len > 0).then_some(next));
+                    }
+                }
+                _ => {}
+            },
+            Event::Mouse(mouse) if show_diagnostics && !show_search => match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    for _ in 0..MOUSE_SCROLL_LINES {
+                        diagnostics_state
+                            .select(Some(selected_index(&diagnostics_state).saturating_sub(1)));
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    let len = sivtr_core::diagnostics::log().len();
+                    for _ in 0..MOUSE_SCROLL_LINES {
+                        let next =
+                            (selected_index(&diagnostics_state) + 1).min(len.saturating_sub(1));
+                        diagnostics_state.select((len > 0).then_some(next));
                     }
                 }
                 _ => {}

@@ -3,6 +3,7 @@ pub mod archive;
 pub mod cache;
 pub mod capture;
 pub mod config;
+pub mod diagnostics;
 pub mod export;
 pub mod origin;
 pub mod privacy;

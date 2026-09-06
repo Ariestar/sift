@@ -89,7 +89,19 @@ impl AgentSessionProvider for GenericProvider {
                 sessions.extend(list_sqlite_sessions(self.provider, &path)?);
                 continue;
             }
-            let parsed = self.parse_session_file(&path)?;
+            // One unreadable file must not drop the provider's whole listing;
+            // warn and keep going (same policy as the jsonl meta reader).
+            let parsed = match self.parse_session_file(&path) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    crate::diagnostics::warn(format!(
+                        "failed to parse {} session {}: {error:#}",
+                        self.provider.command_name(),
+                        path.display()
+                    ));
+                    continue;
+                }
+            };
             if parsed.blocks.is_empty() {
                 continue;
             }
