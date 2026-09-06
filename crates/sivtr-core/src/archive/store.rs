@@ -205,13 +205,12 @@ fn replace_records(tx: &Transaction<'_>, session_row: i64, records: &[WorkRecord
             .map(|status| (Some(status.outcome), status.exit_code))
             .unwrap_or((None, None));
         tx.execute(
-            "INSERT INTO records (session_row, idx, kind, title, started_at, ended_at,
+            "INSERT INTO records (session_row, idx, title, started_at, ended_at,
              outcome, exit_code, blob, blob_light)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 session_row,
                 record.work_ref.index() as i64,
-                record.kind_label(),
                 record.title,
                 record.time.started_at,
                 record.time.ended_at,
@@ -874,21 +873,13 @@ pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::{
-        MessageRole, WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-        RECORD_SCHEMA_VERSION,
-    };
+    use crate::record::{MessageRole, WorkSessionRef, WorkTime, RECORD_SCHEMA_VERSION};
     use crate::test_fixtures::message_part;
 
     fn terminal_record(session: &str, index: usize, content: &str) -> WorkRecord {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: format!("terminal/{session}/{index}").parse().unwrap(),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: session.to_string(),
                 canonical_id: Some(session.to_string()),

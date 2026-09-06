@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use sivtr_core::record::{WorkPath, WorkRecord, WorkRef};
+use sivtr_core::record::{WorkRecord, WorkRef};
 
 use crate::cli::ZoomArgs;
 use crate::commands::memory::show;
@@ -60,7 +60,7 @@ fn expand_around(
             .with_context(|| format!("No record found for ref `{source_ref}`"))?;
         let mut session_records = all_records
             .iter()
-            .filter(|record| same_stream(source, record))
+            .filter(|record| source.work_ref.path.same_stream(&record.work_ref.path))
             .collect::<Vec<_>>();
         session_records.sort_by_key(|record| record.work_ref.index());
 
@@ -82,31 +82,10 @@ fn expand_around(
     Ok(expanded)
 }
 
-fn same_stream(left: &WorkRecord, right: &WorkRecord) -> bool {
-    match (&left.work_ref.path, &right.work_ref.path) {
-        (WorkPath::Terminal { .. }, WorkPath::Terminal { .. }) => {
-            left.work_ref.session() == right.work_ref.session()
-        }
-        (
-            WorkPath::Agent {
-                provider: left_provider,
-                ..
-            },
-            WorkPath::Agent {
-                provider: right_provider,
-                ..
-            },
-        ) => left_provider == right_provider && left.work_ref.session() == right.work_ref.session(),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::record::{
-        WorkChannel, WorkOutcome, WorkRecordKind, WorkSessionRef, WorkSource, WorkStatus, WorkTime,
-    };
+    use sivtr_core::record::{WorkOutcome, WorkSessionRef, WorkStatus, WorkTime};
 
     #[test]
     fn expand_around_expands_each_record_and_dedups_overlaps() {
@@ -156,11 +135,6 @@ mod tests {
         WorkRecord {
             schema_version: 1,
             work_ref: WorkRef::terminal("session_1", index),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: "session_1".to_string(),
                 canonical_id: Some("session_1".to_string()),

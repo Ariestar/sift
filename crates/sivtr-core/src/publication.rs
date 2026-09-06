@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::privacy;
-use crate::record::{MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef};
+use crate::record::{MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRef};
 
 pub const PUBLICATION_SCHEMA_VERSION: u32 = 1;
 pub const GRANULAR_PUBLICATION_SCHEMA_VERSION: u32 = 2;
@@ -351,7 +351,7 @@ fn create_record_publication_draft(
 
     let first = &records[order[0]];
     ensure!(
-        first.kind == WorkRecordKind::ChatTurn,
+        first.is_agent(),
         "publish v1 only supports agent conversations, not terminal records"
     );
     ensure!(
@@ -381,16 +381,8 @@ fn create_record_publication_draft(
             "publication anchors must match records in order"
         );
         ensure!(
-            record.kind == WorkRecordKind::ChatTurn,
+            record.is_agent(),
             "publish v1 only supports agent conversations"
-        );
-        ensure!(
-            record.source.channel == crate::record::WorkChannel::Chat,
-            "publication contains a non-chat record"
-        );
-        ensure!(
-            record.source.provider.as_deref() == Some(provider.command_name()),
-            "publication provider metadata does not match its WorkRef"
         );
         ensure!(
             record.work_ref.is_local(),
@@ -718,12 +710,8 @@ fn validate_granular_record(
     session: Option<&str>,
 ) -> Result<()> {
     ensure!(
-        record.kind == WorkRecordKind::ChatTurn,
+        record.is_agent(),
         "granular publication only supports agent conversations"
-    );
-    ensure!(
-        record.source.channel == crate::record::WorkChannel::Chat,
-        "publication contains a non-chat record"
     );
     ensure!(
         record.work_ref.is_local(),
@@ -733,10 +721,6 @@ fn validate_granular_record(
         .work_ref
         .provider()
         .ok_or_else(|| anyhow::anyhow!("publish requires an agent provider"))?;
-    ensure!(
-        record.source.provider.as_deref() == Some(record_provider.command_name()),
-        "publication provider metadata does not match its WorkRef"
-    );
     if let Some(provider) = provider {
         ensure!(
             record_provider == provider,
@@ -827,9 +811,9 @@ fn hex_sha256(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::record::{
-        MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
-        WorkPart, WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkSource, WorkTarget,
-        WorkTime, RECORD_SCHEMA_VERSION,
+        MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkPart,
+        WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkTarget, WorkTime,
+        RECORD_SCHEMA_VERSION,
     };
     use crate::test_fixtures::message_part;
 
@@ -878,11 +862,6 @@ mod tests {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(crate::agents::AgentProvider::Codex, "session", index),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".into()),
-            },
             session: WorkSessionRef {
                 id: "session".into(),
                 canonical_id: None,
@@ -1150,9 +1129,6 @@ mod tests {
 
         let mut terminal = local.clone();
         terminal.work_ref = WorkRef::terminal("session", 1);
-        terminal.kind = WorkRecordKind::TerminalCommand;
-        terminal.source.channel = WorkChannel::Terminal;
-        terminal.source.provider = None;
         assert!(create_publication_draft(
             std::slice::from_ref(&terminal),
             &[terminal.work_ref.with_part(1)],
@@ -1163,7 +1139,6 @@ mod tests {
         let mut other_provider = granular_record(2);
         other_provider.work_ref =
             WorkRef::agent(crate::agents::AgentProvider::Claude, "session", 2);
-        other_provider.source.provider = Some("claude".into());
         let cross = [
             local.work_ref.with_part(1),
             other_provider.work_ref.with_part(1),

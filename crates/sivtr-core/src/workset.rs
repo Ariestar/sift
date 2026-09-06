@@ -6,17 +6,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::agents::AgentProvider;
 use crate::query::{load_session_records, LoadMode};
-use crate::record::{WorkAt, WorkPath, WorkRecord, WorkRef, WorkScope};
+use crate::record::{WorkAt, WorkRecord, WorkRef, WorkScope};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub const WORKSET_SCHEMA_VERSION: u32 = 2;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum WorkSelectionKind {
-    Terminal,
-    Agent(AgentProvider),
-}
+/// Stream discriminator for a selection scope: `None` = terminal, `Some` =
+/// the agent provider — same shape as `WorkPath::provider()`.
+pub type WorkSelectionKind = Option<AgentProvider>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkSelectionTarget {
@@ -45,14 +43,7 @@ impl WorkSelectionTarget {
                 if &record.work_ref.scope != scope {
                     return false;
                 }
-                let path_matches = match (kind, &record.work_ref.path) {
-                    (WorkSelectionKind::Terminal, WorkPath::Terminal { .. }) => true,
-                    (WorkSelectionKind::Agent(expected), WorkPath::Agent { provider, .. }) => {
-                        expected == provider
-                    }
-                    _ => false,
-                };
-                path_matches
+                record.work_ref.path.provider() == *kind
                     && session
                         .as_deref()
                         .is_none_or(|expected| record.work_ref.session() == expected)
@@ -419,10 +410,7 @@ impl WorkSet {
 
         for (path, indices) in &needed {
             // Any record in the group gives us the namespace; pick the first.
-            let namespace = session_namespace(&self.records()[indices[0]].work_ref.path);
-            let Some(namespace) = namespace else {
-                continue;
-            };
+            let namespace = self.records()[indices[0]].work_ref.path.namespace();
             let full = load_session_records(namespace, Path::new(path), LoadMode::Full)
                 .with_context(|| format!("Failed to load full session {path} for {namespace}"))?;
             for index in indices {
@@ -437,16 +425,6 @@ impl WorkSet {
             }
         }
         Ok(())
-    }
-}
-
-/// Cache namespace for a record's session file, used by
-/// [`WorkSet::materialize_parts`] to pick the right cache view when
-/// re-loading full records.
-fn session_namespace(path: &WorkPath) -> Option<&'static str> {
-    match path {
-        WorkPath::Agent { provider, .. } => Some(provider.command_name()),
-        WorkPath::Terminal { .. } => Some("terminal"),
     }
 }
 

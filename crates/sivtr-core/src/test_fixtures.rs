@@ -5,9 +5,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::record::{
-    MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
-    WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
-    WorkSource, WorkStatus, WorkTarget, WorkTime, RECORD_SCHEMA_VERSION,
+    MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkOutcome, WorkPart,
+    WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkStatus, WorkTarget, WorkTime,
+    RECORD_SCHEMA_VERSION,
 };
 
 /// Create a normal repo (`root/.git` dir).
@@ -78,11 +78,6 @@ pub(crate) fn terminal_record(session: &str, index: usize, title: &str, text: &s
     WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref: WorkRef::terminal(session, index),
-        kind: WorkRecordKind::TerminalCommand,
-        source: WorkSource {
-            channel: WorkChannel::Terminal,
-            provider: None,
-        },
         session: WorkSessionRef {
             id: session.to_string(),
             canonical_id: None,

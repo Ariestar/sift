@@ -322,14 +322,7 @@ fn short_time(record: &WorkRecord) -> String {
 }
 
 fn source_label(record: &WorkRecord) -> &'static str {
-    match record.kind {
-        sivtr_core::record::WorkRecordKind::TerminalCommand => "terminal",
-        sivtr_core::record::WorkRecordKind::ChatTurn => record
-            .work_ref
-            .provider()
-            .map(|provider| provider.command_name())
-            .unwrap_or("agent"),
-    }
+    record.work_ref.path.namespace()
 }
 
 fn escape_markdown_title(title: &str) -> String {

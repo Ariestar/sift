@@ -102,19 +102,13 @@ mod tests {
     use crate::test_fixtures::message_part;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
-        WorkTime, RECORD_SCHEMA_VERSION,
+        MessageRole, WorkRecord, WorkRef, WorkSessionRef, WorkTime, RECORD_SCHEMA_VERSION,
     };
 
     fn record() -> WorkRecord {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(AgentProvider::Codex, "session", 1),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".into()),
-            },
             session: WorkSessionRef {
                 id: "session".into(),
                 canonical_id: None,

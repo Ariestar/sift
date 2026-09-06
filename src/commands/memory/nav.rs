@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use sivtr_core::record::{WorkAt, WorkPath, WorkRecord, WorkRef};
+use sivtr_core::record::{WorkAt, WorkRecord, WorkRef};
 use std::path::PathBuf;
 
 use crate::cli::NavArgs;
@@ -209,29 +209,10 @@ fn session_records_for<'a>(
 ) -> Vec<&'a WorkRecord> {
     let mut records = all_records
         .iter()
-        .filter(|candidate| same_stream(record, candidate))
+        .filter(|candidate| record.work_ref.path.same_stream(&candidate.work_ref.path))
         .collect::<Vec<_>>();
     records.sort_by_key(|record| record.work_ref.index());
     records
-}
-
-fn same_stream(left: &WorkRecord, right: &WorkRecord) -> bool {
-    match (&left.work_ref.path, &right.work_ref.path) {
-        (WorkPath::Terminal { .. }, WorkPath::Terminal { .. }) => {
-            left.work_ref.session() == right.work_ref.session()
-        }
-        (
-            WorkPath::Agent {
-                provider: left_provider,
-                ..
-            },
-            WorkPath::Agent {
-                provider: right_provider,
-                ..
-            },
-        ) => left_provider == right_provider && left.work_ref.session() == right.work_ref.session(),
-        _ => false,
-    }
 }
 
 fn offset_index(position: usize, offset: isize, len: usize) -> Option<usize> {
@@ -343,9 +324,7 @@ fn parse_signed_literal(value: &str, label: &str) -> Result<isize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::record::{
-        MessageRole, WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{MessageRole, WorkSessionRef, WorkTime};
 
     #[test]
     fn parses_motion_steps() {
@@ -440,11 +419,6 @@ mod tests {
         WorkRecord {
             schema_version: sivtr_core::record::RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::terminal("session_1", index),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: "session_1".to_string(),
                 canonical_id: Some("session_1".to_string()),

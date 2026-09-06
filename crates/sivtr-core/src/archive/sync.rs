@@ -517,16 +517,11 @@ mod tests {
 
     #[test]
     fn sync_session_derives_id_from_canonical_records() {
-        use crate::record::{WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource};
+        use crate::record::WorkSessionRef;
         let file = tempfile::NamedTempFile::new().unwrap();
         let record = WorkRecord {
             schema_version: crate::record::RECORD_SCHEMA_VERSION,
             work_ref: "codex/canonical-id/1".parse().unwrap(),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".into()),
-            },
             session: WorkSessionRef {
                 id: "canonical-id".into(),
                 canonical_id: Some("canonical-id".into()),

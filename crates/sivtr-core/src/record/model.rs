@@ -74,14 +74,7 @@ impl WorkRecordCopyParts {
     }
 }
 
-pub const RECORD_SCHEMA_VERSION: u32 = 4;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkRecordKind {
-    TerminalCommand,
-    ChatTurn,
-}
+pub const RECORD_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -125,20 +118,6 @@ impl std::fmt::Display for WorkOutcome {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_status_arg())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkChannel {
-    Terminal,
-    Chat,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkSource {
-    pub channel: WorkChannel,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -458,8 +437,6 @@ impl WorkPart {
 pub struct WorkRecord {
     pub schema_version: u32,
     pub work_ref: WorkRef,
-    pub kind: WorkRecordKind,
-    pub source: WorkSource,
     pub session: WorkSessionRef,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -472,6 +449,30 @@ pub struct WorkRecord {
 }
 
 impl WorkRecord {
+    /// Stream discriminator derived from the ref: `None` = terminal, else
+    /// the agent provider. The single source of truth — everything else
+    /// (namespace, labels, cache keys) renders off this.
+    pub fn provider(&self) -> Option<AgentProvider> {
+        self.work_ref.provider()
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.provider().is_none()
+    }
+
+    pub fn is_agent(&self) -> bool {
+        self.provider().is_some()
+    }
+
+    /// `"shell"` / `"ai"` — the kind label, derived from the ref.
+    pub fn kind_label(&self) -> &'static str {
+        if self.is_terminal() {
+            "shell"
+        } else {
+            "ai"
+        }
+    }
+
     pub fn terminal(entry: &SessionEntry, session_path: &Path, index: usize) -> Option<Self> {
         let command = entry.command.trim().to_string();
         let output = entry.output.trim().to_string();
@@ -499,11 +500,6 @@ impl WorkRecord {
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref,
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: session_id.clone(),
                 canonical_id: Some(session_id.clone()),
@@ -565,11 +561,6 @@ impl WorkRecord {
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref,
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some(provider.command_name().to_string()),
-            },
             session: WorkSessionRef {
                 id: session_ref_id,
                 canonical_id,
@@ -832,11 +823,6 @@ fn selected_block_record(
     WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref,
-        kind: WorkRecordKind::ChatTurn,
-        source: WorkSource {
-            channel: WorkChannel::Chat,
-            provider: Some(provider.command_name().to_string()),
-        },
         session: WorkSessionRef {
             id: session_ref_id,
             canonical_id,
@@ -869,11 +855,6 @@ fn selected_group_record(
     vec![WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref,
-        kind: WorkRecordKind::ChatTurn,
-        source: WorkSource {
-            channel: WorkChannel::Chat,
-            provider: Some(provider.command_name().to_string()),
-        },
         session: WorkSessionRef {
             id: session_ref_id,
             canonical_id,
@@ -1583,7 +1564,8 @@ mod tests {
 
         let record = WorkRecord::terminal(&entry, Path::new("session_123.log"), 0).unwrap();
 
-        assert_eq!(record.kind, WorkRecordKind::TerminalCommand);
+        assert!(record.is_terminal());
+        assert_eq!(record.kind_label(), "shell");
         assert_eq!(record.cwd.as_deref(), Some("D:\\sivtr"));
         assert_eq!(
             record.time.ended_at.as_deref().and_then(parse_timestamp),
@@ -1854,7 +1836,8 @@ mod tests {
         let records = WorkRecord::chat_turns(AgentProvider::Pi, &session);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].kind, WorkRecordKind::ChatTurn);
+        assert!(records[0].is_agent());
+        assert_eq!(records[0].kind_label(), "ai");
         assert_eq!(records[0].work_ref.provider(), Some(AgentProvider::Pi));
         assert_eq!(records[0].input_text().as_deref(), Some("implement this"));
         assert_eq!(records[0].output_text().as_deref(), Some("done"));

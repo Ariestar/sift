@@ -447,9 +447,9 @@ mod tests {
     use super::*;
     use crate::agents::{AgentBlock, AgentBlockKind};
     use crate::record::{
-        agent_parts, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
-        WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkSessionRef,
-        WorkSource, WorkStatus, WorkTarget, WorkTime, RECORD_SCHEMA_VERSION,
+        agent_parts, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkOutcome,
+        WorkPart, WorkPartBody, WorkRecord, WorkSessionRef, WorkStatus, WorkTarget, WorkTime,
+        RECORD_SCHEMA_VERSION,
     };
 
     /// Rank a plain query string (test convenience over [`rank_terms_with`]).
@@ -506,11 +506,6 @@ mod tests {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::terminal(session, index),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: session.to_string(),
                 canonical_id: None,

@@ -16,7 +16,7 @@ use crate::tui::content::view::{ContentSelection, ContentViewMode};
 use crate::tui::search::WorkspaceSearchScope;
 use crate::tui::theme;
 use crate::tui::workspace::rows::Rows;
-use sivtr_core::workset::{WorkSelectionKind, WorkSelectionTarget};
+use sivtr_core::workset::WorkSelectionTarget;
 
 /// Indices of true entries in a selection mask, in order.
 pub(crate) fn selected_indices(mask: &[bool]) -> Vec<usize> {
@@ -26,56 +26,55 @@ pub(crate) fn selected_indices(mask: &[bool]) -> Vec<usize> {
         .collect()
 }
 
-/// Kind of memory source (local path body before any `scope:` prefix).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum WorkspaceSourceKind {
-    Terminal,
-    Agent(AgentProvider),
+/// Kind of memory source: `None` = terminal, `Some` = the agent provider —
+/// the same discriminator as `WorkPath::provider()`.
+pub(crate) type WorkspaceSourceKind = Option<AgentProvider>;
+
+/// Rendering metadata for the stream discriminator (badges, colors).
+pub(crate) trait SourceKindDisplay: Copy {
+    fn path(self) -> &'static str;
+    fn badge(self) -> String;
+    fn color(self) -> Color;
 }
 
-impl WorkspaceSourceKind {
-    pub(crate) fn path(self) -> &'static str {
+impl SourceKindDisplay for WorkspaceSourceKind {
+    fn path(self) -> &'static str {
+        sivtr_core::record::WorkPath::namespace_for(self)
+    }
+
+    fn badge(self) -> String {
+        const BADGES: &[(AgentProvider, &str)] = &[
+            (AgentProvider::Codex, "cdx"),
+            (AgentProvider::Claude, "cld"),
+            (AgentProvider::Cursor, "cur"),
+            (AgentProvider::Dsh, "dsh"),
+            (AgentProvider::OpenCode, "opc"),
+            (AgentProvider::OpenClaw, "ocw"),
+            (AgentProvider::Hermes, "hrm"),
+            (AgentProvider::Grok, "grk"),
+            (AgentProvider::Pi, "pi"),
+            (AgentProvider::Qoder, "qdr"),
+            (AgentProvider::QoderCn, "qcn"),
+            (AgentProvider::Gemini, "gmi"),
+            (AgentProvider::Goose, "gse"),
+            (AgentProvider::Qwen, "qwn"),
+            (AgentProvider::Zcode, "zcd"),
+        ];
         match self {
-            Self::Terminal => "terminal",
-            Self::Agent(provider) => provider.command_name(),
+            None => "term".to_string(),
+            Some(provider) => BADGES
+                .iter()
+                .find(|(known, _)| *known == provider)
+                .map(|(_, badge)| badge.to_string())
+                .unwrap_or_else(|| provider.command_name().chars().take(3).collect()),
         }
     }
 
-    pub(crate) fn badge(self) -> String {
+    fn color(self) -> Color {
         match self {
-            Self::Terminal => "term".to_string(),
-            Self::Agent(AgentProvider::Codex) => "cdx".to_string(),
-            Self::Agent(AgentProvider::Claude) => "cld".to_string(),
-            Self::Agent(AgentProvider::Cursor) => "cur".to_string(),
-            Self::Agent(AgentProvider::Dsh) => "dsh".to_string(),
-            Self::Agent(AgentProvider::OpenCode) => "opc".to_string(),
-            Self::Agent(AgentProvider::OpenClaw) => "ocw".to_string(),
-            Self::Agent(AgentProvider::Hermes) => "hrm".to_string(),
-            Self::Agent(AgentProvider::Grok) => "grk".to_string(),
-            Self::Agent(AgentProvider::Pi) => "pi".to_string(),
-            Self::Agent(AgentProvider::Qoder) => "qdr".to_string(),
-            Self::Agent(AgentProvider::QoderCn) => "qcn".to_string(),
-            Self::Agent(AgentProvider::Gemini) => "gmi".to_string(),
-            Self::Agent(AgentProvider::Goose) => "gse".to_string(),
-            Self::Agent(AgentProvider::Qwen) => "qwn".to_string(),
-            Self::Agent(AgentProvider::Zcode) => "zcd".to_string(),
-            Self::Agent(provider) => provider.command_name().chars().take(3).collect(),
+            None => theme::terminal_color(),
+            Some(provider) => theme::provider_color(provider),
         }
-    }
-
-    pub(crate) fn color(self) -> Color {
-        match self {
-            Self::Terminal => theme::terminal_color(),
-            Self::Agent(provider) => theme::provider_color(provider),
-        }
-    }
-
-    pub(crate) fn is_agent(self) -> bool {
-        matches!(self, Self::Agent(_))
-    }
-
-    pub(crate) fn is_terminal(self) -> bool {
-        matches!(self, Self::Terminal)
     }
 }
 
@@ -94,11 +93,11 @@ impl WorkspaceSource {
     }
 
     pub(crate) fn terminal() -> Self {
-        Self::local(WorkspaceSourceKind::Terminal)
+        Self::local(None)
     }
 
     pub(crate) fn agent(provider: AgentProvider) -> Self {
-        Self::local(WorkspaceSourceKind::Agent(provider))
+        Self::local(Some(provider))
     }
 
     /// A source on another device, addressed by its mount alias.
@@ -139,11 +138,11 @@ impl WorkspaceSource {
     }
 
     pub(crate) fn is_agent(&self) -> bool {
-        self.kind.is_agent()
+        self.kind.is_some()
     }
 
     pub(crate) fn is_terminal(&self) -> bool {
-        self.kind.is_terminal()
+        self.kind.is_none()
     }
 
     pub(crate) fn selection_target(&self, session: Option<&str>) -> WorkSelectionTarget {
@@ -151,10 +150,7 @@ impl WorkspaceSource {
             scope: self.scope.as_deref().map_or(WorkScope::Local, |scope| {
                 WorkScope::Named(scope.to_string())
             }),
-            kind: match self.kind {
-                WorkspaceSourceKind::Terminal => WorkSelectionKind::Terminal,
-                WorkspaceSourceKind::Agent(provider) => WorkSelectionKind::Agent(provider),
-            },
+            kind: self.kind,
             session: session.map(str::to_string),
         }
     }
