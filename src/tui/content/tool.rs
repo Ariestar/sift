@@ -257,7 +257,16 @@ fn tool_body(
         (Some(call), Some(result)) => format!("{call}\n{result}"),
         (Some(call), None) => call,
         (None, Some(result)) => result,
-        (None, None) => sivtr_core::record::format_work_part(part),
+        // The evidence format renders only when the projection asks for the
+        // whole part; a sliced view shows just its own side.
+        (None, None) => match slice {
+            ProjectionSlice::Whole => sivtr_core::record::format_work_part(part),
+            ProjectionSlice::Input => input
+                .map(sivtr_core::record::WorkContent::text)
+                .map(std::borrow::Cow::into_owned)
+                .unwrap_or_default(),
+            ProjectionSlice::Output => sivtr_core::record::output_blocks_text(output),
+        },
     }
 }
 

@@ -529,23 +529,26 @@ mod tests {
 
     /// Chat turn with typed parts: `(kind, text)` pairs. Built through the
     /// real reducer (`agent_parts` over `AgentBlock`s), so the passage shapes
-    /// match what production parsing produces. Shell command/output/error
-    /// blocks share a call id, so the output folds into the call.
+    /// match what production parsing produces: a shell call folds its output
+    /// blocks into one action, giving Command and Output/Error passages.
+    /// An `error` part carries a parseable shell result JSON with a nonzero
+    /// exit code, matching what providers actually emit for failures.
     fn chat_record(session: &str, index: usize, title: &str, parts: &[(&str, &str)]) -> WorkRecord {
         let kind = |name: &str| match name {
-            "command" | "output" | "error" => AgentBlockKind::ToolCall,
+            "command" => AgentBlockKind::ToolCall,
+            "output" | "error" => AgentBlockKind::ToolOutput,
             "user" => AgentBlockKind::User,
             "assistant" => AgentBlockKind::Assistant,
             _ => AgentBlockKind::Thinking,
         };
+        let shell = |k: &str| matches!(k, "command" | "output" | "error");
         let mut blocks = Vec::new();
         for (k, text) in parts {
             blocks.push(AgentBlock {
                 kind: kind(k),
                 timestamp: None,
-                label: (matches!(*k, "command" | "output" | "error")).then(|| "bash".to_string()),
-                call_id: matches!(*k, "command" | "output" | "error")
-                    .then(|| format!("call-{index}")),
+                label: shell(k).then(|| "bash".to_string()),
+                call_id: shell(k).then(|| format!("call-{index}")),
                 start_line: None,
                 text: (*text).to_string(),
             });
@@ -800,7 +803,10 @@ mod tests {
                 "dev",
                 1,
                 "error surface",
-                &[("error", "connection refused: no route to host")],
+                &[(
+                    "error",
+                    r#"{"stderr":"connection refused: no route to host","exit_code":1}"#,
+                )],
             ),
             chat_record(
                 "dev",

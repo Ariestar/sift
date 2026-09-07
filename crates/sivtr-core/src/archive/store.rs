@@ -905,10 +905,9 @@ pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::record::{
-        MessageRole, WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-        RECORD_SCHEMA_VERSION,
+        WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime, RECORD_SCHEMA_VERSION,
     };
-    use crate::test_fixtures::message_part;
+    use crate::test_fixtures::shell_part;
 
     fn terminal_record(session: &str, index: usize, content: &str) -> WorkRecord {
         WorkRecord {
@@ -932,7 +931,10 @@ mod tests {
             },
             status: None,
             title: format!("record {index}"),
-            parts: vec![message_part(1, MessageRole::Assistant, content)],
+            // A terminal record carries one shell action whose output holds
+            // the content, so the round trip exercises action serialization
+            // and command projection — not a message part.
+            parts: vec![shell_part(1, Some("echo run"), Some(content))],
         }
     }
 
