@@ -83,7 +83,7 @@
     "package": "bun run compile && node node_modules/@vscode/vsce/vsce package --no-dependencies --no-yarn --allow-missing-repository"
   },
   "devDependencies": {
-    "@types/node": "26.4.1",
+    "@types/node": "26.5.0",
     "@types/vscode": "1.136.0",
     "@vscode/vsce": "3.9.2",
     "typescript": "7.0.2"
