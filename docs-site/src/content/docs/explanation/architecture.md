@@ -124,7 +124,7 @@ terminal context + provider sessions -> WorkspaceSession list -> search/pick/sho
 
 ## Unified archive
 
-Queries (search, show, copy, TUI, MCP) read from one local SQLite archive (`archive.db`) instead of parsing native files on every run. The sync engine — `sivtr sync`, plus an automatic freshness pass on query — fills the archive from every agent provider and every workspace's terminal logs. Native session files remain the source of truth and are only read by the sync engine.
+Queries (search, show, copy, TUI, MCP) read from one local SQLite archive (`archive.db`) instead of parsing native files on every run. The sync engine — `sivtr sync`, plus an automatic freshness pass on query — fills the archive from every agent provider and every workspace's terminal logs. Native session files remain the source of truth: the sync engine reads them, and session-addressed loads self-heal by parsing the native file when the archive copy is missing or stale.
 
 ```text
 terminal logs + provider sessions -> sync (stat-stamp compare) -> archive.db -> query paths

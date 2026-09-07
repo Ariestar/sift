@@ -19,7 +19,7 @@ It does not provide a hosted transcript service by default.
 
 ## The local archive
 
-Terminal captures and agent sessions sync into one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth and are only read by the sync engine.
+Terminal captures and agent sessions sync into one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth, read only locally by the sync engine (plus self-healing loads that parse a native file when the archive copy is missing or stale).
 
 ## Explicit remote share
 

@@ -78,7 +78,7 @@ search、show、copy、picker、TUI 和 MCP 查询都从统一的本地 archive 
 | macOS | `~/Library/Application Support/sivtr/archive.db` |
 | Linux | `~/.config/sivtr/archive.db` |
 
-它是一个 SQLite 数据库（WAL 模式），由 sync 引擎写入：`sivtr sync` 显式执行一次同步，查询在 archive 比 `[sync].max_age_secs` 更旧时也会自动执行新鲜度同步。原生 Agent session 文件和 shell session log 仍是 source of truth，只有 sync 引擎会读取它们。可用 `SIVTR_DATA_DIR` 覆盖根目录。
+它是一个 SQLite 数据库（WAL 模式），由 sync 引擎写入：`sivtr sync` 显式执行一次同步，查询在 archive 比 `[sync].max_age_secs` 更旧时也会自动执行新鲜度同步。原生 Agent session 文件和 shell session log 仍是 source of truth：sync 引擎会读取它们；按 session 寻址的加载（show、zoom、copy 指定 ref）还具备自愈能力——当该 session 在 archive 中缺失或过期时，加载器会解析原生文件并重新归档。可用 `SIVTR_DATA_DIR` 覆盖根目录。
 
 ## 生成的启动器
 

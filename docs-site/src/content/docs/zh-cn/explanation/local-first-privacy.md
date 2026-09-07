@@ -19,7 +19,7 @@ description: sivtr 如何让 Agent memory、终端输出和 transcript 保持在
 
 ## 本地 archive
 
-终端捕获和 Agent session 会同步进一个本地 SQLite archive（`archive.db`），位于 sivtr 的 data 目录下。这个过程中没有任何数据离开本机：原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
+终端捕获和 Agent session 会同步进一个本地 SQLite archive（`archive.db`），位于 sivtr 的 data 目录下。这个过程中没有任何数据离开本机：原生 session 文件仍是 source of truth，只有本机进程读取它们（sync 引擎，以及在 archive 副本缺失或过期时自愈解析原生文件的加载路径）。
 
 ## 显式远程分享
 

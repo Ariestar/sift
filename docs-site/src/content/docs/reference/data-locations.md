@@ -78,7 +78,7 @@ Search, show, copy, picker, TUI, and MCP queries read from a unified local archi
 | macOS | `~/Library/Application Support/sivtr/archive.db` |
 | Linux | `~/.config/sivtr/archive.db` |
 
-It is a SQLite database (WAL mode) written by the sync engine: `sivtr sync` runs a pass explicitly, and queries run an automatic freshness pass when the archive is older than `[sync].max_age_secs`. Native agent session files and shell session logs remain the source of truth and are only read by the sync engine. Override the root with `SIVTR_DATA_DIR`.
+It is a SQLite database (WAL mode) written by the sync engine: `sivtr sync` runs a pass explicitly, and queries run an automatic freshness pass when the archive is older than `[sync].max_age_secs`. Native agent session files and shell session logs remain the source of truth. The sync engine reads them, and session-addressed loads (show, zoom, copy of a specific ref) self-heal: when a session is missing or stale in the archive, the loader parses the native file and re-archives it. Override the root with `SIVTR_DATA_DIR`.
 
 ## Generated launchers
 

@@ -125,7 +125,7 @@ terminal context + provider sessions -> WorkspaceSession list -> search/pick/sho
 
 ## 统一 archive
 
-查询（search、show、copy、TUI、MCP）从统一的本地 SQLite archive（`archive.db`）读取，而不是每次运行都解析原生文件。sync 引擎——`sivtr sync`，加上查询时自动的新鲜度同步——把每个 Agent provider 和每个 workspace 的终端日志写入 archive。原生 session 文件仍是 source of truth，只有 sync 引擎会读取它们。
+查询（search、show、copy、TUI、MCP）从统一的本地 SQLite archive（`archive.db`）读取，而不是每次运行都解析原生文件。sync 引擎——`sivtr sync`，加上查询时自动的新鲜度同步——把每个 Agent provider 和每个 workspace 的终端日志写入 archive。原生 session 文件仍是 source of truth：sync 引擎读取它们；当 session 在 archive 中缺失或过期时，按 session 寻址的加载会通过解析原生文件自愈。
 
 ```text
 终端 log + provider session -> sync（stat stamp 比对）-> archive.db -> 查询路径
