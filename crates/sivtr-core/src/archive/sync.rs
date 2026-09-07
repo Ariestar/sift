@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -34,13 +34,14 @@ pub const TERMINAL_NAMESPACE: &str = "terminal";
 pub struct SyncCounts {
     pub added: usize,
     pub updated: usize,
+    pub removed: usize,
     pub unchanged: usize,
     pub failed: usize,
 }
 
 impl SyncCounts {
     pub fn changed(&self) -> usize {
-        self.added + self.updated
+        self.added + self.updated + self.removed
     }
 }
 
@@ -95,32 +96,91 @@ pub fn sync_all(full: bool) -> Result<SyncReport> {
 /// [`sync_all`] on a caller-owned connection, so one process pass reuses a
 /// single handle (the query path syncs and reads on the same connection).
 pub fn sync_all_with_conn(conn: &Connection, full: bool) -> Result<SyncReport> {
+    let providers: Vec<_> = AgentProvider::all()
+        .iter()
+        .filter(|spec| spec.provider.has_native_source())
+        .map(|spec| spec.provider)
+        .collect();
+    sync_sources(conn, full, &providers, true)
+}
+
+/// Provider session totals after the same archive freshness pass used by all
+/// query surfaces. A failed provider is reported without exposing a second
+/// native listing path to callers.
+#[derive(Debug, Clone)]
+pub struct ProviderArchiveStatus {
+    pub name: String,
+    pub sessions: usize,
+    pub error: Option<String>,
+}
+
+pub fn provider_status() -> Result<Vec<ProviderArchiveStatus>> {
+    let conn = schema::open()?;
+    provider_status_with_conn(&conn)
+}
+
+pub fn provider_status_with_conn(conn: &Connection) -> Result<Vec<ProviderArchiveStatus>> {
+    let skipped = ensure_fresh_with_conn(conn)?;
+    let counts = store::provider_counts(conn)?;
+    let counts: HashMap<String, i64> = counts
+        .into_iter()
+        .map(|count| (count.provider, count.sessions))
+        .collect();
+
+    AgentProvider::all()
+        .iter()
+        .filter(|spec| spec.provider.has_native_source())
+        .map(|spec| {
+            let provider = spec.provider.command_name();
+            let errors: Vec<String> = skipped
+                .iter()
+                .filter(|entry| entry.namespace == provider)
+                .map(|entry| format!("{}: {}", entry.path.display(), entry.error))
+                .collect();
+            let error = (!errors.is_empty()).then(|| errors.join("; "));
+            let sessions = usize::try_from(counts.get(provider).copied().unwrap_or_default())
+                .context("archived provider session count is negative")?;
+            Ok(ProviderArchiveStatus {
+                name: spec.provider.name().to_string(),
+                sessions,
+                error,
+            })
+        })
+        .collect()
+}
+
+fn sync_sources(
+    conn: &Connection,
+    full: bool,
+    providers: &[AgentProvider],
+    include_terminals: bool,
+) -> Result<SyncReport> {
     let started = std::time::Instant::now();
 
     let mut sources = Vec::new();
-    for spec in AgentProvider::all() {
-        sources.push(sync_provider(conn, spec.provider, full));
+    for provider in providers {
+        sources.push(sync_provider(conn, *provider, full));
     }
-    sources.push(sync_terminals(conn, full));
+    if include_terminals {
+        sources.push(sync_terminals(conn, full));
+    }
 
-    // The freshness stamp advances only on a clean pass: a source that
-    // failed listing or parsing leaves it stale, so the next query re-syncs
-    // and re-reports the failure instead of reading a stale archive for a
-    // full `max_age_secs` window.
-    let clean = sources
+    let report = SyncReport {
+        sources,
+        duration_ms: started.elapsed().as_millis() as u64,
+    };
+    if report
+        .sources
         .iter()
-        .all(|source| source.error.is_none() && source.failures.is_empty());
-    if clean {
+        .all(|source| source.error.is_none() && source.failures.is_empty())
+    {
         store::meta_set(
             conn,
             "last_sync_at",
             &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
         )?;
     }
-    Ok(SyncReport {
-        sources,
-        duration_ms: started.elapsed().as_millis() as u64,
-    })
+    Ok(report)
 }
 
 /// Sync one agent provider's sessions.
@@ -157,10 +217,19 @@ fn sync_provider(conn: &Connection, provider: AgentProvider, full: bool) -> Sour
 
     let mut counts = SyncCounts::default();
     let mut failures = Vec::new();
+    let mut source_paths = Vec::with_capacity(sessions.len());
     for info in sessions {
-        let Some(stamp) = crate::cache::file_stamp(&info.path) else {
-            // The file vanished between listing and stamping; the archived
-            // copy (if any) stays.
+        source_paths.push(info.path.to_string_lossy().into_owned());
+        let physical_path = info.physical_path.as_deref().unwrap_or(&info.path);
+        let Some(stamp) = crate::cache::file_stamp(physical_path) else {
+            counts.failed += 1;
+            failures.push((
+                info.path.clone(),
+                format!(
+                    "source disappeared before sync: {}",
+                    physical_path.display()
+                ),
+            ));
             continue;
         };
         if !full && stamps.get(info.path.to_string_lossy().as_ref()) == Some(&stamp) {
@@ -173,6 +242,7 @@ fn sync_provider(conn: &Connection, provider: AgentProvider, full: bool) -> Sour
             &info.path,
             info.id.as_deref(),
             info.title.as_deref(),
+            info.cwd.as_deref(),
             stamp,
         ) {
             Ok(was_new) => {
@@ -186,6 +256,16 @@ fn sync_provider(conn: &Connection, provider: AgentProvider, full: bool) -> Sour
                 counts.failed += 1;
                 failures.push((info.path.clone(), format!("{error:#}")));
             }
+        }
+    }
+    match store::remove_missing_sessions(conn, provider.command_name(), &source_paths) {
+        Ok(removed) => counts.removed = removed,
+        Err(error) => {
+            counts.failed += 1;
+            failures.push((
+                PathBuf::from(format!("<{}>", provider.command_name())),
+                format!("failed to reconcile removed sessions: {error:#}"),
+            ));
         }
     }
     report(counts, None, failures)
@@ -220,6 +300,7 @@ fn sync_terminals(conn: &Connection, full: bool) -> SourceSyncReport {
             };
         }
     };
+    let mut source_paths = Vec::new();
 
     for meta in workspaces {
         let root = PathBuf::from(&meta.root);
@@ -233,7 +314,10 @@ fn sync_terminals(conn: &Connection, full: bool) -> SourceSyncReport {
             }
         };
         for path in logs {
+            source_paths.push(path.to_string_lossy().into_owned());
             let Some(stamp) = crate::cache::file_stamp(&path) else {
+                counts.failed += 1;
+                failures.push((path.clone(), "source disappeared before sync".to_string()));
                 continue;
             };
             if !full && stamps.get(path.to_string_lossy().as_ref()) == Some(&stamp) {
@@ -245,7 +329,15 @@ fn sync_terminals(conn: &Connection, full: bool) -> SourceSyncReport {
                 .and_then(|name| name.to_str())
                 .unwrap_or("current")
                 .to_string();
-            match sync_session(conn, &TerminalSource, &path, Some(&session_id), None, stamp) {
+            match sync_session(
+                conn,
+                &TerminalSource,
+                &path,
+                Some(&session_id),
+                None,
+                None,
+                stamp,
+            ) {
                 Ok(was_new) => {
                     if was_new {
                         counts.added += 1;
@@ -257,6 +349,19 @@ fn sync_terminals(conn: &Connection, full: bool) -> SourceSyncReport {
                     counts.failed += 1;
                     failures.push((path.clone(), format!("{error:#}")));
                 }
+            }
+        }
+    }
+
+    if first_error.is_none() {
+        match store::remove_missing_sessions(conn, TERMINAL_NAMESPACE, &source_paths) {
+            Ok(removed) => counts.removed = removed,
+            Err(error) => {
+                counts.failed += 1;
+                failures.push((
+                    PathBuf::from("<terminal>"),
+                    format!("failed to reconcile removed sessions: {error:#}"),
+                ));
             }
         }
     }
@@ -273,28 +378,37 @@ fn sync_terminals(conn: &Connection, full: bool) -> SourceSyncReport {
 /// session row was created.
 ///
 /// The session id is derived from the parsed records' canonical session id
-/// when available, falling back to the listing id and then the file stem —
-/// one derivation rule for every caller, so a self-healing load and a
-/// listing-driven sync land on the same archive row.
+/// when available, otherwise from the provider's listing id. Sources without
+/// either stable identity are rejected instead of being assigned a guess.
+///
+/// Usage extraction runs in the same source transaction boundary: providers
+/// whose transcripts carry per-call token usage contribute `usage_events`
+/// rows, and an extraction/storage error fails this source rather than
+/// publishing a session with incomplete accounting.
 pub fn sync_session(
     conn: &Connection,
     source: &dyn SessionSource,
     path: &Path,
     listing_id: Option<&str>,
     listing_title: Option<&str>,
+    listing_cwd: Option<&str>,
     stamp: Stamp,
 ) -> Result<bool> {
     let records = SessionSource::parse_file(source, path)?;
     let provider = source.namespace();
-    let session_id = derive_session_id(&records, listing_id, path);
-    let cwd = records.iter().find_map(|record| record.cwd.clone());
+    let session_id = derive_session_id(&records, listing_id)?;
+    let usage_events = crate::usage::extract::extract(provider, path)?;
+    let cwd = records
+        .iter()
+        .find_map(|record| record.cwd.clone())
+        .or_else(|| listing_cwd.map(str::to_string));
     let workspace_key = cwd
         .as_deref()
         .map(Path::new)
         .and_then(workspace::repo_identity)
         .unwrap_or_default();
 
-    store::upsert_session(
+    let inserted = store::upsert_session(
         conn,
         &SessionUpsert {
             provider,
@@ -305,23 +419,31 @@ pub fn sync_session(
             title: listing_title,
             stamp,
             records: &records,
+            usage_events: &usage_events,
         },
-    )
+    )?;
+    Ok(inserted)
 }
 
-/// Prefer the canonical session id the records themselves carry; the listing
-/// id and the file stem are fallbacks for empty sessions.
-fn derive_session_id(records: &[WorkRecord], listing_id: Option<&str>, path: &Path) -> String {
+/// Prefer the canonical session id the records themselves carry, then use the
+/// stable id supplied by the provider listing.
+fn derive_session_id(records: &[WorkRecord], listing_id: Option<&str>) -> Result<String> {
     records
         .iter()
-        .find_map(|record| record.session.canonical_id.clone())
-        .or_else(|| listing_id.map(str::to_string))
-        .unwrap_or_else(|| {
-            path.file_stem()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string()
+        .find_map(|record| {
+            record
+                .session
+                .canonical_id
+                .clone()
+                .filter(|id| !id.trim().is_empty())
         })
+        .or_else(|| {
+            listing_id
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| anyhow::anyhow!("source session has no stable session id"))
 }
 
 /// Rate-limited freshness pass for query paths: re-sync only when the last
@@ -370,49 +492,10 @@ pub fn ensure_fresh_with_conn(conn: &Connection) -> Result<Vec<SkippedSession>> 
     Ok(skipped)
 }
 
-/// `[sync] max_age_secs` from the config. Load errors propagate — a
-/// malformed config file should surface as the search's error, not silently
-/// stand in for a setting the user wrote.
+/// Read `[sync] max_age_secs`; malformed configuration is an error rather
+/// than a reason to silently change query freshness.
 fn sync_max_age_secs() -> Result<u64> {
     Ok(SivtrConfig::load()?.sync.max_age_secs)
-}
-
-/// Sync one session file on demand (self-healing loads): parse, store, and
-/// leave the records to the caller. Store failures never fail the read the
-/// caller already holds — the next sync repairs the archive (same policy as
-/// the old parse cache).
-pub fn store_session_records(namespace: &str, path: &Path, records: &[WorkRecord]) {
-    let Some(stamp) = crate::cache::file_stamp(path) else {
-        return;
-    };
-    let session_id = derive_session_id(records, None, path);
-    let cwd = records.iter().find_map(|record| record.cwd.clone());
-    let workspace_key = cwd
-        .as_deref()
-        .map(Path::new)
-        .and_then(workspace::repo_identity)
-        .unwrap_or_default();
-    let title = records.first().map(|record| record.title.clone());
-
-    let result = schema::open().and_then(|conn| {
-        store::upsert_session(
-            &conn,
-            &SessionUpsert {
-                provider: namespace,
-                session_id: &session_id,
-                source_path: path,
-                cwd: cwd.as_deref(),
-                workspace_key: &workspace_key,
-                title: title.as_deref(),
-                stamp,
-                records,
-            },
-        )
-        .map(|_| ())
-    });
-    if let Err(error) = result {
-        let _ = error; // best-effort write; the next sync repairs
-    }
 }
 
 #[cfg(test)]
@@ -423,16 +506,19 @@ mod tests {
     fn ensure_fresh_never_hard_fails_on_empty_environments() {
         let _guard = crate::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // With no real agent homes and no workspaces, sync succeeds with
-        // empty listings or per-provider errors — never a hard failure —
-        // and stamps last_sync_at.
+        // empty listings or per-provider errors — never a hard failure.
+        // Providers whose homes are missing error their listing, so every
+        // skip entry carries a reason; the stamp stays held by the dirty
+        // pass (a_failed_source_holds_the_freshness_stamp covers that).
         let skipped = ensure_fresh().expect("sync tolerates empty environments");
         assert!(skipped.iter().all(|entry| !entry.error.is_empty()));
-        let conn = schema::open().unwrap();
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
-        assert!(last.is_some(), "sync stamps last_sync_at");
-        std::env::remove_var("SIVTR_DATA_DIR");
+        match previous {
+            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
+            None => std::env::remove_var("SIVTR_DATA_DIR"),
+        }
     }
 
     #[test]
@@ -451,8 +537,10 @@ mod tests {
             sessions.join("rollout-broken.jsonl"),
             concat!(
                 r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc"}}"#,
-                "\n",
-                "{broken json\n",
+                "
+",
+                "{broken json
+",
             ),
         )
         .unwrap();
@@ -481,6 +569,19 @@ mod tests {
     }
 
     #[test]
+    fn sync_stamps_an_empty_source_set() {
+        let _guard = crate::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        let conn = schema::open().unwrap();
+        let report = sync_sources(&conn, false, &[], false).unwrap();
+        assert!(report.sources.is_empty());
+        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        assert!(last.is_some(), "sync stamps last_sync_at");
+        std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    #[test]
     fn sync_session_derives_id_from_canonical_records() {
         use crate::record::{WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource};
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -504,7 +605,7 @@ mod tests {
             parts: vec![],
         };
         // Records carry the canonical id even when the listing id differs.
-        let derived = derive_session_id(&[record], Some("listing-id"), file.path());
+        let derived = derive_session_id(&[record], Some("listing-id")).unwrap();
         assert_eq!(derived, "canonical-id");
     }
 }
