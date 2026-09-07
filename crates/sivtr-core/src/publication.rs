@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::privacy;
-use crate::record::{
-    output_blocks_text, MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRef,
-};
+use crate::record::{output_blocks_text, MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRef};
 
 pub const PUBLICATION_SCHEMA_VERSION: u32 = 1;
 pub const GRANULAR_PUBLICATION_SCHEMA_VERSION: u32 = 2;
