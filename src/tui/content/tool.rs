@@ -520,11 +520,10 @@ mod tests {
             input,
             output.map(|(value, _)| value),
         );
-        if let WorkPartBody::Action { output, status, .. } = &mut part.body {
+        if let WorkPartBody::Action { output, .. } = &mut part.body {
             if let Some(block) = output.first_mut() {
                 block.start_line = start_line;
             }
-            *status = WorkActionStatus::Completed;
         }
         part
     }
