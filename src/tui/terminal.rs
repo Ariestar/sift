@@ -78,9 +78,14 @@ impl Drop for Tui {
             let _ = restore_terminal_state(&mut state);
         }
         self.drawing_active = false;
+        // Claim "back on the normal screen" only when every cleanup step
+        // disarmed: a failed restore may leave the alternate screen up, and
+        // stderr diagnostics would paint over it.
+        let cleaned = !state.has_pending_cleanup();
         drop(state);
-        // Back on the normal screen: diagnostics may mirror to stderr again.
-        crate::output::set_tui_owns_screen(false);
+        if cleaned {
+            crate::output::set_tui_owns_screen(false);
+        }
     }
 }
 
@@ -330,7 +335,15 @@ fn apply_full_redraw_policy(buffer: &mut Buffer) {
 pub fn restore(terminal: &mut Tui) -> Result<()> {
     terminal.drawing_active = false;
     let mut state = terminal.state.borrow_mut();
-    restore_terminal_state(&mut state)
+    let result = restore_terminal_state(&mut state);
+    // The terminal is genuinely back on the normal screen (suspend() will
+    // hand it to an external program): resume stderr diagnostics only once
+    // every cleanup step disarmed. `Tui::drop` re-checks on the way out, so
+    // leaving the flag set here is safe.
+    if result.is_ok() && !state.has_pending_cleanup() {
+        crate::output::set_tui_owns_screen(false);
+    }
+    result
 }
 
 /// Restore a terminal and preserve both the operation error and a cleanup error, if both occur.
