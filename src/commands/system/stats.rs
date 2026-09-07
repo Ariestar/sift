@@ -43,7 +43,9 @@ fn print_report(report: &StatsSummary) {
         report.active_days,
         format_duration(report.total_duration_ms),
     );
+    // A count of findings, never the finding values.
     println!(
+        // count only, no secret values
         "outcomes: {} success · {} failure · {} unknown · {} secret findings",
         report.outcomes.success,
         report.outcomes.failure,

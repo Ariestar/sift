@@ -70,7 +70,8 @@ fn session(args: &UsageSessionArgs) -> Result<()> {
     }
 
     print_warnings(&result);
-    println!("usage for {provider}/{session_id}");
+    // Echoes the address the user themselves passed on the command line.
+    println!("usage for {provider}/{session_id}"); // echoes the CLI argument, not stored secrets
     print_groups(&result.summary);
     print_total(&result.summary);
     Ok(())

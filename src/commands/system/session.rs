@@ -42,7 +42,9 @@ fn list(starred: bool, json: bool) -> Result<()> {
         return Ok(());
     }
     for session in sessions {
+        // Session ids are machine addresses, not secret material.
         println!(
+            // non-secret session id listing
             "{} {} {}{}",
             session.provider,
             session.session_id,

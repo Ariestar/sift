@@ -38,7 +38,10 @@ fn secrets(json: bool) -> Result<()> {
         return Ok(());
     }
     for finding in findings {
+        // A session address and an occurrence count — never the secret value
+        // the finding points at.
         println!(
+            // non-secret session address and count
             "{} / {} · {} · {} occurrence(s)",
             finding.provider, finding.session_id, finding.kind, finding.occurrences
         );
