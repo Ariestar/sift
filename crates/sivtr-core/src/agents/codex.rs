@@ -432,6 +432,30 @@ mod tests {
     }
 
     #[test]
+    fn unclosed_skill_wrapper_stays_user_dialogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc","cwd":"C:\\repo"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-04-27T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<skill>\n<name>half</name>\nstarted reading the skill doc but never"}]}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        // A truncated wrapper is user text, not a Codex skill expansion:
+        // reclassifying it would swallow real dialogue into a Skill block.
+        assert_eq!(session.blocks.len(), 1);
+        assert_eq!(session.blocks[0].kind, AgentBlockKind::User);
+        assert!(session.blocks[0].text.starts_with("<skill>"));
+    }
+
+    #[test]
     fn selects_last_turn_without_tool_noise() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rollout.jsonl");

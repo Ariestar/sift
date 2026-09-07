@@ -332,7 +332,9 @@ fn bare_skill_wrapper(text: &str) -> Option<(String, String)> {
         return None;
     }
     let body = text.strip_prefix(OPEN)?;
-    let body = body.strip_suffix(CLOSE).unwrap_or(body);
+    // An unclosed wrapper is not a Codex skill expansion — treating it as
+    // one would swallow user text into a Skill block, so keep it dialogue.
+    let body = body.strip_suffix(CLOSE)?;
     let name_start = body.find("<name>")? + "<name>".len();
     let name_end = body[name_start..].find("</name>")? + name_start;
     let name = body[name_start..name_end].trim();
