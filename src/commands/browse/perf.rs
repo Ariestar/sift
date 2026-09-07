@@ -6,7 +6,8 @@ use crate::pane::{Pane, PaneInput, Viewport};
 use crate::tui::workspace::{WorkspaceDialogue, WorkspaceSession, WorkspaceSource};
 use sivtr_core::agents::AgentProvider;
 use sivtr_core::record::{
-    WorkPart, WorkRecord, WorkRef, WorkSessionRef, WorkTime, RECORD_SCHEMA_VERSION,
+    MessageRole, WorkContent, WorkPart, WorkPartBody, WorkRecord, WorkRef, WorkSessionRef,
+    WorkTime, RECORD_SCHEMA_VERSION,
 };
 use std::cell::RefCell;
 use std::time::UNIX_EPOCH;
@@ -30,7 +31,14 @@ fn fat_record(session: &str, index: usize, title: &str) -> WorkRecord {
         parts: vec![WorkPart {
             seq: 0,
             occurred_at: None,
-            data: sivtr_core::record::WorkPartData::Assistant { content: blob },
+            body: WorkPartBody::Message {
+                role: MessageRole::Assistant,
+                label: None,
+                content: WorkContent::Text {
+                    content: blob,
+                    ansi: None,
+                },
+            },
         }],
     }
 }
