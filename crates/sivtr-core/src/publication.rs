@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::privacy;
-use crate::record::{MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef};
+use crate::record::{
+    output_blocks_text, MessageRole, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkRef,
+};
 
 pub const PUBLICATION_SCHEMA_VERSION: u32 = 1;
 pub const GRANULAR_PUBLICATION_SCHEMA_VERSION: u32 = 2;
@@ -772,7 +774,16 @@ fn public_part_kind(part: &WorkPart) -> Result<PublicPartKind> {
             MessageRole::System => Ok(PublicPartKind::Skill),
             MessageRole::Reasoning => Ok(PublicPartKind::Thinking),
         },
-        WorkPartBody::Action { .. } => Ok(PublicPartKind::ToolCall),
+        // Classified from the action's rendered output, never from
+        // `part.text()`: that falls back to the input, which would turn an
+        // input-only action into a result.
+        WorkPartBody::Action { output, .. } => {
+            if output_blocks_text(output).is_empty() {
+                Ok(PublicPartKind::ToolCall)
+            } else {
+                Ok(PublicPartKind::ToolResult)
+            }
+        }
     }
 }
 
