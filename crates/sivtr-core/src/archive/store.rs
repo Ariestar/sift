@@ -50,7 +50,11 @@ pub struct SessionUpsert<'a> {
 
 /// Insert or replace one session and its records. Returns `true` when a new
 /// row was created, `false` when an existing row (matched by session id or
-/// source path) was updated in place.
+/// source path) was updated in place. The matched row adopts the upsert's
+/// session id, so a derived-id change on one file can never split into a
+/// second row later. The row write and the record replacement commit
+/// together: a failure mid-way leaves the previous session intact instead
+/// of a half-updated row the freshness stamp would then treat as current.
 pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
     let (started_at, ended_at) = session_time_bounds(up.records);
     let cwd_norm = up
@@ -58,25 +62,49 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
         .map(|cwd| crate::agents::normalize_path_for_match(Path::new(cwd)))
         .unwrap_or_default();
 
-    let existing: Option<i64> = conn
+    let tx = conn.unchecked_transaction()?;
+    let id_row: Option<i64> = tx
         .query_row(
-            "SELECT id FROM sessions WHERE provider = ?1 AND (session_id = ?2 OR source_path = ?3)",
-            params![up.provider, up.session_id, up.source_path.to_string_lossy()],
+            "SELECT id FROM sessions WHERE provider = ?1 AND session_id = ?2",
+            params![up.provider, up.session_id],
             |row| row.get(0),
         )
         .optional()
-        .context("Failed to look up archived session")?;
+        .context("Failed to look up archived session by id")?;
+    let path_row: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM sessions WHERE provider = ?1 AND source_path = ?2",
+            params![up.provider, up.source_path.to_string_lossy()],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("Failed to look up archived session by path")?;
 
-    let session_row = match existing {
+    // The same file re-parsed under a changed id keeps its row (path match,
+    // id adopted); a genuine new session inserts. A session id that now
+    // belongs to a different file loses that claim: the current file wins
+    // the id, keeping one row per source file.
+    let existing_row = match (id_row, path_row) {
+        (Some(id), Some(path)) if id != path => {
+            tx.execute("DELETE FROM sessions WHERE id = ?1", [id])
+                .context("Failed to release a session id claimed by another file")?;
+            Some(path)
+        }
+        (Some(row), _) | (_, Some(row)) => Some(row),
+        (None, None) => None,
+    };
+
+    match existing_row {
         Some(row) => {
-            conn.execute(
-                "UPDATE sessions SET source_path = ?2, cwd = ?3, cwd_norm = ?4, workspace_key = ?5,
-                 title = ?6, started_at = ?7, ended_at = ?8, record_count = ?9,
-                 mtime_secs = ?10, mtime_nanos = ?11, size = ?12,
+            tx.execute(
+                "UPDATE sessions SET session_id = ?2, source_path = ?3, cwd = ?4, cwd_norm = ?5,
+                 workspace_key = ?6, title = ?7, started_at = ?8, ended_at = ?9, record_count = ?10,
+                 mtime_secs = ?11, mtime_nanos = ?12, size = ?13,
                  synced_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                  WHERE id = ?1",
                 params![
                     row,
+                    up.session_id,
                     up.source_path.to_string_lossy(),
                     up.cwd,
                     cwd_norm,
@@ -91,10 +119,9 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                 ],
             )
             .with_context(|| format!("Failed to update archived session {}", up.session_id))?;
-            row
         }
         None => {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO sessions (provider, session_id, source_path, cwd, cwd_norm,
                  workspace_key, title, started_at, ended_at, record_count,
                  mtime_secs, mtime_nanos, size, synced_at)
@@ -117,17 +144,21 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                 ],
             )
             .with_context(|| format!("Failed to insert archived session {}", up.session_id))?;
-            conn.last_insert_rowid()
         }
-    };
+    }
 
-    replace_records(conn, session_row, up.records)?;
-    Ok(existing.is_none())
+    // `last_insert_rowid` also reports the id of the row an UPDATE touched,
+    // so one read covers both branches.
+    let session_row = tx.last_insert_rowid();
+    let inserted = existing_row.is_none();
+
+    replace_records(&tx, session_row, up.records)?;
+    tx.commit().context("Failed to commit archived session")?;
+    Ok(inserted)
 }
 
-/// Replace one session's record rows inside a transaction.
-fn replace_records(conn: &Connection, session_row: i64, records: &[WorkRecord]) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
+/// Replace one session's record rows inside the caller's transaction.
+fn replace_records(tx: &Connection, session_row: i64, records: &[WorkRecord]) -> Result<()> {
     tx.execute("DELETE FROM records WHERE session_row = ?1", [session_row])
         .context("Failed to clear archived records")?;
     for record in records {
@@ -155,7 +186,6 @@ fn replace_records(conn: &Connection, session_row: i64, records: &[WorkRecord]) 
         )
         .context("Failed to insert archived record")?;
     }
-    tx.commit().context("Failed to commit archived records")?;
     Ok(())
 }
 
@@ -322,10 +352,11 @@ pub struct ListedSession {
 
 /// List archived sessions for the given namespaces, workspace-filtered.
 ///
-/// The filter mirrors the live discovery policy: unbound sessions (no cwd)
-/// stay visible everywhere, an exact cwd match always matches, and a session
-/// inside a git checkout matches any browsing directory of the same
-/// repository (workspace key from the shared git dir).
+/// The filter mirrors the shared [`crate::agents::filter_sessions_by_workspace`]
+/// policy: unbound sessions (no cwd) stay visible everywhere, an exact cwd
+/// match always matches, and a session inside a git checkout matches any
+/// browsing directory of the same repository (workspace key from the shared
+/// git dir, precomputed at sync time so the query stays an index scan).
 ///
 /// `recent_per_namespace` truncates each namespace to its most recently
 /// modified sessions, matching the live listing order.
@@ -350,7 +381,7 @@ pub fn list_workspace_sessions(
             "SELECT id, source_path FROM sessions
              WHERE provider = ?1
                AND (?4 = 1
-                    OR cwd IS NULL OR cwd = ''
+                    OR cwd IS NULL
                     OR cwd_norm = ?2
                     OR (?3 != '' AND workspace_key = ?3))
              ORDER BY mtime_secs DESC, mtime_nanos DESC, id DESC
@@ -508,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_reuses_row_when_session_id_or_path_changes() {
+    fn upsert_adopts_new_session_id_and_handles_path_moves() {
         let _guard = crate::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
@@ -517,14 +548,23 @@ mod tests {
 
         let mut up = sample_upsert(&records);
         assert!(upsert_session(&conn, &up).unwrap(), "first insert");
-        // Same path, different derived id: updates in place.
+        // Same path, different derived id: updates in place and adopts the
+        // new id, so a later id+path change still finds this row instead of
+        // inserting a duplicate for the same file.
         up.session_id = "renamed";
         assert!(!upsert_session(&conn, &up).unwrap(), "path match updates");
-        // Same id, different path: updates in place.
+        let saved: String = conn
+            .query_row(
+                "SELECT session_id FROM sessions WHERE source_path = ?1",
+                [up.source_path.to_string_lossy()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, "renamed", "path match adopts the derived id");
+        // The renamed session's file moving keeps one row: id matches.
         let moved = Path::new("/repo/terminals/session_1_moved.jsonl");
-        let mut up2 = sample_upsert(&records);
-        up2.source_path = moved;
-        assert!(!upsert_session(&conn, &up2).unwrap(), "id match updates");
+        up.source_path = moved;
+        assert!(!upsert_session(&conn, &up).unwrap(), "id match updates");
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
