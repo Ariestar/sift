@@ -28,7 +28,7 @@ pub fn set_tui_owns_screen(active: bool) {
 /// the same messages through the `!` overlay). Call once at binary startup,
 /// before any command can warn.
 pub fn install_diagnostics_listener() {
-    sivtr_core::diagnostics::subscribe(Box::new(|message| {
+    sivtr_core::diagnostics::subscribe(std::sync::Arc::new(|message| {
         if !TUI_OWNS_SCREEN.load(Ordering::Acquire) {
             labeled("warning", Style::YellowBold, message);
         }

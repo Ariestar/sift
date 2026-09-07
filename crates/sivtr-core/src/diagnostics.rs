@@ -12,32 +12,40 @@ static LOG: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 const LOG_CAP: usize = 200;
 
 /// Listeners mirror each warning to additional destinations (stderr).
-type Listener = Box<dyn Fn(&str) + Send + Sync>;
+/// Arc-shared so `warn` can clone the list and invoke outside the lock.
+type Listener = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 static LISTENERS: OnceLock<Mutex<Vec<Listener>>> = OnceLock::new();
 
 /// Report a warning: appended to the diagnostics log and mirrored to every
-/// registered listener. Thread-safe; never blocks on lock poisoning.
+/// registered listener. Thread-safe; listeners run outside the lock so they
+/// may warn or subscribe re-entrantly. Never blocks on lock poisoning.
 pub fn warn(message: impl Display) {
     let message = message.to_string();
-    if let Some(mut log) = LOG.get().and_then(|log| log.lock().ok()) {
-        if log.len() == LOG_CAP {
-            log.remove(0);
-        }
-        log.push(message.clone());
+    let mut log = LOG
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if log.len() == LOG_CAP {
+        log.remove(0);
     }
-    if let Some(listeners) = LISTENERS.get().and_then(|listeners| listeners.lock().ok()) {
-        for listener in listeners.iter() {
-            listener(&message);
-        }
+    log.push(message.clone());
+    drop(log);
+    let listeners = LISTENERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    for listener in listeners.iter() {
+        listener(&message);
     }
 }
 
 /// Snapshot of the diagnostics log, oldest first.
 pub fn log() -> Vec<String> {
-    LOG.get()
-        .and_then(|log| log.lock().ok())
-        .map(|log| log.clone())
-        .unwrap_or_default()
+    LOG.get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// Register a warning destination (stderr for CLI runs). Only listeners
@@ -61,7 +69,7 @@ mod tests {
         // which is the same `warn` pipeline the ring mirrors.
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
-        subscribe(Box::new(move |message| {
+        subscribe(std::sync::Arc::new(move |message: &str| {
             sink.lock().unwrap().push(message.to_string());
         }));
         warn("ordered first");
@@ -81,7 +89,7 @@ mod tests {
     fn subscribers_see_every_warning() {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
-        subscribe(Box::new(move |message| {
+        subscribe(std::sync::Arc::new(move |message: &str| {
             sink.lock().unwrap().push(message.to_string());
         }));
         warn("for the listener");

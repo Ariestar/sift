@@ -91,9 +91,6 @@ pub fn init() -> Result<Tui> {
     // here too. `install` is idempotent, and `register_panic_restore` below arms the closure.
     panic::install();
     ensure_tui_stdout()?;
-    // Warnings stay in the diagnostics ring while the UI is up (the `!`
-    // overlay shows them); stderr mirroring resumes on teardown.
-    crate::output::set_tui_owns_screen(true);
 
     // Pick the palette before the first frame draws: honor the config
     // override, otherwise detect light/dark and truecolor from the
@@ -204,6 +201,11 @@ pub fn init() -> Result<Tui> {
         #[cfg(windows)]
         synchronized_updates_supported,
     };
+    // Set only once the TUI is fully constructed: every failure path above
+    // now exits through `setup.fail` or `?` without leaving the flag latched.
+    // Warnings stay in the diagnostics ring while the UI is up (the `!`
+    // overlay shows them); stderr mirroring resumes on teardown.
+    crate::output::set_tui_owns_screen(true);
     Ok(tui)
 }
 /// Draw one TUI frame.

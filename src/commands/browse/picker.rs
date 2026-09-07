@@ -116,7 +116,9 @@ pub(crate) fn run(
     let mut mouse_down_select: Option<MouseSelectionStart> = None;
     let mut show_help = false;
     let mut show_diagnostics = false;
-    let mut diagnostics_state = ListState::default();
+    // First entry selected so the initial Down/j moves to the second line
+    // instead of silently skipping the oldest warning.
+    let mut diagnostics_state = ListState::default().with_selected(Some(0));
     let mut publish_overlay: Option<PublishOverlay> = None;
     let mut publish_error: Option<String> = None;
     let mut show_search = false;
