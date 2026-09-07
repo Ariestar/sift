@@ -774,19 +774,18 @@ fn action_input(part: &WorkPart) -> Option<(&WorkTarget, &WorkContent)> {
 fn projected_part_text(part: &WorkPart, projection: Projection) -> String {
     match projection.slice_of(part) {
         ProjectionSlice::Whole => format_work_part(part),
+        // The sliced side of an action renders just that side. A side with
+        // no content contributes nothing — falling back to the whole-part
+        // format would leak the other side into this view.
         ProjectionSlice::Input => match &part.body {
             WorkPartBody::Action {
                 input: Some(input), ..
             } => input.text().into_owned(),
-            _ => format_work_part(part),
+            _ => String::new(),
         },
         ProjectionSlice::Output => match &part.body {
-            WorkPartBody::Action { output, .. } if !output.is_empty() => output
-                .iter()
-                .map(|block| block.content.text().into_owned())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-            _ => format_work_part(part),
+            WorkPartBody::Action { output, .. } => output_blocks_text(output),
+            _ => String::new(),
         },
     }
 }
@@ -1512,13 +1511,28 @@ pub fn format_work_part(part: &WorkPart) -> String {
         WorkPartBody::Action { target, .. } if target.is_shell() => {
             format_shell_action(part, ProjectionSlice::Whole)
         }
-        WorkPartBody::Action { output, .. } => {
-            let kind = if output.is_empty() {
-                AgentBlockKind::ToolCall
-            } else {
-                AgentBlockKind::ToolOutput
-            };
-            format_structured_block(kind, part.label(), &text)
+        // A merged action may carry both sides: the call arguments as a
+        // ToolCall block, the result as a ToolOutput block — combined text,
+        // copy, and privacy scans never lose one to the other.
+        WorkPartBody::Action { input, output, .. } => {
+            let mut rendered = String::new();
+            if let Some(input) = input {
+                append_text_segment(
+                    &mut rendered,
+                    &format_structured_block(AgentBlockKind::ToolCall, part.label(), &input.text()),
+                );
+            }
+            if !output.is_empty() {
+                append_text_segment(
+                    &mut rendered,
+                    &format_structured_block(
+                        AgentBlockKind::ToolOutput,
+                        part.label(),
+                        &output_blocks_text(output),
+                    ),
+                );
+            }
+            rendered
         }
     }
 }
@@ -1604,6 +1618,20 @@ mod tests {
         );
         assert_eq!(record.input_text().as_deref(), Some("cargo test"));
         assert_eq!(record.output_text().as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn output_only_terminal_record_leaks_nothing_into_input() {
+        // `WorkRecord::terminal` keeps a record whose command is empty but
+        // whose output is not; the command-less shell action must contribute
+        // nothing to the input view rather than fall back to whole-part
+        // rendering (which would show the output there).
+        let entry = SessionEntry::new("repo> ", "", "orphan output");
+
+        let record = WorkRecord::terminal(&entry, Path::new("session_123.log"), 0).unwrap();
+
+        assert_eq!(record.input_text(), None);
+        assert_eq!(record.output_text().as_deref(), Some("orphan output"));
     }
 
     #[test]
@@ -1709,6 +1737,51 @@ mod tests {
         let output = records[0].output_text().unwrap_or_default();
         // The result carries the call's tool name instead of "unknown".
         assert!(output.contains("<:tool:read result:>"));
+    }
+
+    #[test]
+    fn merged_tool_action_keeps_call_arguments_and_result_in_combined_text() {
+        // A merged action carries both the call arguments and the result;
+        // combined text renders both sides so copy and privacy scans never
+        // lose the call payload to the output.
+        let session = AgentSession {
+            path: PathBuf::from("pi-session.jsonl"),
+            id: Some("abcdef123456".to_string()),
+            cwd: Some("D:\\sivtr".to_string()),
+            title: None,
+            blocks: vec![
+                AgentBlock {
+                    kind: AgentBlockKind::User,
+                    timestamp: None,
+                    label: None,
+                    call_id: None,
+                    text: "read a.rs".to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolCall,
+                    timestamp: None,
+                    label: Some("read".to_string()),
+                    call_id: Some("c1".to_string()),
+                    text: "{\"file_path\":\"a.rs\"}".to_string(),
+                    start_line: None,
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolOutput,
+                    timestamp: None,
+                    label: None,
+                    call_id: Some("c1".to_string()),
+                    text: "content".to_string(),
+                    start_line: None,
+                },
+            ],
+        };
+
+        let records = WorkRecord::chat_turns(AgentProvider::Pi, &session);
+        assert_eq!(records[0].parts.len(), 2, "call and result merge");
+        let combined = records[0].combined_text();
+        assert!(combined.contains("a.rs"), "call arguments kept");
+        assert!(combined.contains("content"), "result kept");
     }
 
     #[test]
