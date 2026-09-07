@@ -103,11 +103,20 @@ pub fn sync_all_with_conn(conn: &Connection, full: bool) -> Result<SyncReport> {
     }
     sources.push(sync_terminals(conn, full));
 
-    store::meta_set(
-        conn,
-        "last_sync_at",
-        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-    )?;
+    // The freshness stamp advances only on a clean pass: a source that
+    // failed listing or parsing leaves it stale, so the next query re-syncs
+    // and re-reports the failure instead of reading a stale archive for a
+    // full `max_age_secs` window.
+    let clean = sources
+        .iter()
+        .all(|source| source.error.is_none() && source.failures.is_empty());
+    if clean {
+        store::meta_set(
+            conn,
+            "last_sync_at",
+            &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        )?;
+    }
     Ok(SyncReport {
         sources,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -325,7 +334,7 @@ pub fn ensure_fresh() -> Result<Vec<SkippedSession>> {
 
 /// [`ensure_fresh`] on a caller-owned connection.
 pub fn ensure_fresh_with_conn(conn: &Connection) -> Result<Vec<SkippedSession>> {
-    let max_age_secs = sync_max_age_secs();
+    let max_age_secs = sync_max_age_secs()?;
     if max_age_secs > 0 {
         if let Some(last) = store::meta_get(conn, "last_sync_at")? {
             if let Ok(last) = DateTime::parse_from_rfc3339(&last) {
@@ -361,13 +370,11 @@ pub fn ensure_fresh_with_conn(conn: &Connection) -> Result<Vec<SkippedSession>> 
     Ok(skipped)
 }
 
-/// `[sync] max_age_secs`, defaulting when the config cannot be read so a
-/// malformed config file does not disable search freshness entirely
-/// (config errors surface in `sivtr config show`).
-fn sync_max_age_secs() -> u64 {
-    SivtrConfig::load()
-        .map(|config| config.sync.max_age_secs)
-        .unwrap_or_else(|_| crate::config::SyncConfig::default().max_age_secs)
+/// `[sync] max_age_secs` from the config. Load errors propagate — a
+/// malformed config file should surface as the search's error, not silently
+/// stand in for a setting the user wrote.
+fn sync_max_age_secs() -> Result<u64> {
+    Ok(SivtrConfig::load()?.sync.max_age_secs)
 }
 
 /// Sync one session file on demand (self-healing loads): parse, store, and
@@ -426,6 +433,51 @@ mod tests {
         let last = store::meta_get(&conn, "last_sync_at").unwrap();
         assert!(last.is_some(), "sync stamps last_sync_at");
         std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    #[test]
+    fn a_failed_source_holds_the_freshness_stamp() {
+        let _guard = crate::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let previous_data_dir = std::env::var_os("SIVTR_DATA_DIR");
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        // A codex session that lists fine (valid session_meta line) but
+        // fails to parse during sync (a broken second line) puts a failure
+        // in the codex source's sync report.
+        let codex_home = tempfile::tempdir().unwrap();
+        let sessions = codex_home.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(
+            sessions.join("rollout-broken.jsonl"),
+            concat!(
+                r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc"}}"#,
+                "\n",
+                "{broken json\n",
+            ),
+        )
+        .unwrap();
+        let previous_codex_home = std::env::var_os("CODEX_HOME");
+        std::env::set_var("CODEX_HOME", codex_home.path());
+
+        let report = sync_all_with_conn(&schema::open().unwrap(), false)
+            .expect("sync never hard-fails on a broken source");
+
+        let conn = schema::open().unwrap();
+        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        let codex_failed = report.sources.iter().any(|source| {
+            source.source == "codex" && (source.error.is_some() || !source.failures.is_empty())
+        });
+        assert!(codex_failed, "the broken codex file fails its sync");
+        assert!(last.is_none(), "a failed source holds last_sync_at");
+
+        match previous_codex_home {
+            Some(value) => std::env::set_var("CODEX_HOME", value),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
+            None => std::env::remove_var("SIVTR_DATA_DIR"),
+        }
     }
 
     #[test]
