@@ -680,11 +680,15 @@ mod tests {
     /// an empty skip list and read the archive as-is instead of queuing.
     #[test]
     fn ensure_fresh_fails_open_while_a_pass_is_running() {
+        let _guard = crate::test_env_lock();
         let held = FRESH_GATE.try_lock().expect("gate free in test");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
         let conn = schema::open().unwrap();
         let skipped = ensure_fresh_with_conn(&conn).unwrap();
         assert!(skipped.is_empty(), "blocked reader reads as-is");
         drop(held);
+        std::env::remove_var("SIVTR_DATA_DIR");
     }
 
     #[test]
