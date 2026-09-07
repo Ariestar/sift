@@ -618,13 +618,12 @@ mod tests {
         let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // With no real agent homes and no workspaces, sync succeeds with
-        // empty listings or per-provider errors — never a hard failure —
-        // and stamps last_sync_at.
+        // empty listings or per-provider errors — never a hard failure.
+        // Providers whose homes are missing error their listing, so every
+        // skip entry carries a reason; the stamp stays held by the dirty
+        // pass (a_failed_source_holds_the_freshness_stamp covers that).
         let skipped = ensure_fresh().expect("sync tolerates empty environments");
         assert!(skipped.iter().all(|entry| !entry.error.is_empty()));
-        let conn = schema::open().unwrap();
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
-        assert!(last.is_some(), "sync stamps last_sync_at");
         match previous {
             Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
             None => std::env::remove_var("SIVTR_DATA_DIR"),
@@ -683,12 +682,16 @@ mod tests {
         let _guard = crate::test_env_lock();
         let held = FRESH_GATE.try_lock().expect("gate free in test");
         let dir = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
-        let conn = schema::open().unwrap();
-        let skipped = ensure_fresh_with_conn(&conn).unwrap();
+        let conn = schema::open().expect("open the test archive");
+        let skipped = ensure_fresh_with_conn(&conn).expect("fail-open read succeeds");
         assert!(skipped.is_empty(), "blocked reader reads as-is");
         drop(held);
-        std::env::remove_var("SIVTR_DATA_DIR");
+        match previous {
+            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
+            None => std::env::remove_var("SIVTR_DATA_DIR"),
+        }
     }
 
     #[test]
