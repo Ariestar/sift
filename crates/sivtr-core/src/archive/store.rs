@@ -62,7 +62,9 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
         .map(|cwd| crate::agents::normalize_path_for_match(Path::new(cwd)))
         .unwrap_or_default();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = conn
+        .unchecked_transaction()
+        .context("Failed to begin the archive upsert transaction")?;
     let id_row: Option<i64> = tx
         .query_row(
             "SELECT id FROM sessions WHERE provider = ?1 AND session_id = ?2",
@@ -94,7 +96,7 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
         (None, None) => None,
     };
 
-    match existing_row {
+    let session_row = match existing_row {
         Some(row) => {
             tx.execute(
                 "UPDATE sessions SET session_id = ?2, source_path = ?3, cwd = ?4, cwd_norm = ?5,
@@ -119,6 +121,11 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                 ],
             )
             .with_context(|| format!("Failed to update archived session {}", up.session_id))?;
+            // The matched row id, not `last_insert_rowid`: the record
+            // replacement below rewrites `records` rows before the rowid is
+            // read again, which would re-point it at the last inserted
+            // record.
+            row
         }
         None => {
             tx.execute(
@@ -144,12 +151,9 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                 ],
             )
             .with_context(|| format!("Failed to insert archived session {}", up.session_id))?;
+            tx.last_insert_rowid()
         }
-    }
-
-    // `last_insert_rowid` also reports the id of the row an UPDATE touched,
-    // so one read covers both branches.
-    let session_row = tx.last_insert_rowid();
+    };
     let inserted = existing_row.is_none();
 
     replace_records(&tx, session_row, up.records)?;
@@ -564,7 +568,22 @@ mod tests {
         // The renamed session's file moving keeps one row: id matches.
         let moved = Path::new("/repo/terminals/session_1_moved.jsonl");
         up.source_path = moved;
+        // Different record content proves the UPDATE branch rewrites the
+        // records of the matched row — not of a rowid left over from the
+        // last insert.
+        let renamed_records = vec![terminal_record("renamed", 1, "renamed payload")];
+        up.records = &renamed_records;
         assert!(!upsert_session(&conn, &up).unwrap(), "id match updates");
+        let reloaded = load_records_by_path(&conn, "terminal", moved, BlobMode::Full)
+            .unwrap()
+            .expect("updated session stays readable");
+        assert_eq!(
+            reloaded.len(),
+            1,
+            "updated session keeps exactly one record"
+        );
+        assert_eq!(reloaded[0].title, "record 1");
+        assert_eq!(reloaded[0].parts[0].text(), "renamed payload");
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
