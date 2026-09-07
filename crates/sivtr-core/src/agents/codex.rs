@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn filters_injected_user_envelopes_and_keeps_skill_wrapper() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("test tempdir");
         let path = dir.path().join("rollout.jsonl");
         std::fs::write(
             &path,
@@ -412,9 +412,11 @@ mod tests {
 {"timestamp":"2026-04-27T00:00:09Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
 "#,
         )
-        .unwrap();
+        .expect("write test session log");
 
-        let session = CodexProvider.parse_session_file(&path).unwrap();
+        let session = CodexProvider
+            .parse_session_file(&path)
+            .expect("parse test session");
 
         // Injected envelopes never become dialogue; the bare `<skill>` wrapper
         // becomes a labeled skill block.
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn unclosed_skill_wrapper_stays_user_dialogue() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("test tempdir");
         let path = dir.path().join("rollout.jsonl");
         std::fs::write(
             &path,
@@ -444,9 +446,11 @@ mod tests {
                 "\n",
             ),
         )
-        .unwrap();
+        .expect("write test session log");
 
-        let session = CodexProvider.parse_session_file(&path).unwrap();
+        let session = CodexProvider
+            .parse_session_file(&path)
+            .expect("parse test session");
 
         // A truncated wrapper is user text, not a Codex skill expansion:
         // reclassifying it would swallow real dialogue into a Skill block.

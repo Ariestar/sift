@@ -634,7 +634,7 @@ mod tests {
     fn skips_injected_user_envelopes_without_meta_flag() {
         // Background-task notifications arrive as plain user messages with no
         // isMeta flag; only the text identifies them as machine injections.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("test tempdir");
         let path = dir.path().join("session.jsonl");
         std::fs::write(
             &path,
@@ -645,9 +645,11 @@ mod tests {
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
 "#,
         )
-        .unwrap();
+        .expect("write test session log");
 
-        let session = ClaudeProvider.parse_session_file(&path).unwrap();
+        let session = ClaudeProvider
+            .parse_session_file(&path)
+            .expect("parse test session");
 
         assert_eq!(session.blocks.len(), 2);
         assert_eq!(session.blocks[0].text, "real follow-up");
