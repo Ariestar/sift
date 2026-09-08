@@ -338,23 +338,25 @@ fn part_id(item: &Value, nested: &Value) -> Option<String> {
 pub fn extract_content_text(content: &Value) -> String {
     match content {
         Value::String(text) => text.clone(),
-        Value::Object(object) => object
-            .get("text")
-            .and_then(Value::as_str)
-            .or_else(|| object.get("input_text").and_then(Value::as_str))
-            .or_else(|| object.get("output_text").and_then(Value::as_str))
-            .or_else(|| object.get("content").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_string(),
+        Value::Object(object) => {
+            if let Some(text) = object
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| object.get("input_text").and_then(Value::as_str))
+                .or_else(|| object.get("output_text").and_then(Value::as_str))
+                .or_else(|| object.get("content").and_then(Value::as_str))
+            {
+                text.to_string()
+            } else if let Some(nested) = object.get("content").or_else(|| object.get("message")) {
+                extract_content_text(nested)
+            } else {
+                String::new()
+            }
+        }
         Value::Array(items) => items
             .iter()
-            .filter_map(|item| {
-                item.get("text")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("input_text").and_then(Value::as_str))
-                    .or_else(|| item.get("output_text").and_then(Value::as_str))
-                    .or_else(|| item.as_str())
-            })
+            .map(extract_content_text)
+            .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n\n"),
         _ => String::new(),
@@ -523,6 +525,14 @@ mod tests {
     use crate::test_fixtures::{make_repo, make_worktree};
     use std::fs;
     use std::time::SystemTime;
+
+    #[test]
+    fn extract_content_text_unwraps_nested_message_content_arrays() {
+        let value = serde_json::json!({
+            "content": [{"type": "text", "text": "hello nested"}]
+        });
+        assert_eq!(extract_content_text(&value), "hello nested");
+    }
 
     #[test]
     fn cwd_candidates_do_not_duplicate_the_primary_cwd() {

@@ -147,13 +147,17 @@ fn apply_event(session: &mut AgentSession, value: &Value) {
         });
 
     // Common Cursor/Claude-like shapes.
+    // Cursor agent transcripts wrap payloads as `{role, message:{content:[...]}}`.
+    let payload = cursor_payload(value);
     match value
         .get("type")
         .and_then(Value::as_str)
         .or_else(|| value.get("role").and_then(Value::as_str))
     {
-        Some("user") | Some("human") => push_text(session, AgentBlockKind::User, timestamp, value),
-        Some("assistant") | Some("ai") => push_assistant(session, timestamp, value),
+        Some("user") | Some("human") => {
+            push_text(session, AgentBlockKind::User, timestamp, payload)
+        }
+        Some("assistant") | Some("ai") => push_assistant(session, timestamp, payload),
         Some("tool") | Some("tool_result") | Some("toolResult") => {
             push_text(session, AgentBlockKind::ToolOutput, timestamp, value)
         }
@@ -199,6 +203,14 @@ fn apply_event(session: &mut AgentSession, value: &Value) {
                 }
             }
         }
+    }
+}
+
+/// Cursor composer rows put the Anthropic-style payload under `message`.
+fn cursor_payload(value: &Value) -> &Value {
+    match value.get("message") {
+        Some(message) if message.is_object() => message,
+        _ => value,
     }
 }
 
@@ -341,5 +353,44 @@ mod tests {
         assert_eq!(session.blocks[0].kind, AgentBlockKind::User);
         assert_eq!(session.blocks[1].kind, AgentBlockKind::Assistant);
         assert_eq!(session.blocks[2].kind, AgentBlockKind::ToolCall);
+    }
+
+    #[test]
+    fn maps_composer_role_message_envelope() {
+        let mut session = AgentSession {
+            path: PathBuf::from("t.jsonl"),
+            id: None,
+            cwd: None,
+            title: None,
+            blocks: Vec::new(),
+        };
+        apply_event(
+            &mut session,
+            &json!({
+                "role": "user",
+                "message": {
+                    "content": [{"type": "text", "text": "是否可以考虑把jina模型换成kimi 3"}]
+                }
+            }),
+        );
+        apply_event(
+            &mut session,
+            &json!({
+                "role": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "先看 Jina 怎么接。"},
+                        {"type": "tool_use", "name": "Read", "input": {"path": "config.py"}}
+                    ]
+                }
+            }),
+        );
+        assert_eq!(session.blocks.len(), 3);
+        assert_eq!(session.blocks[0].kind, AgentBlockKind::User);
+        assert!(session.blocks[0].text.contains("kimi 3"));
+        assert_eq!(session.blocks[1].kind, AgentBlockKind::Assistant);
+        assert!(session.blocks[1].text.contains("Jina"));
+        assert_eq!(session.blocks[2].kind, AgentBlockKind::ToolCall);
+        assert_eq!(session.blocks[2].label.as_deref(), Some("Read"));
     }
 }

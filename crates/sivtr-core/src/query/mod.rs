@@ -236,7 +236,7 @@ fn load_session_files(
 }
 
 /// Bump when the cached record layout or agent parsing changes.
-const AGENT_CACHE_VERSION: u32 = 9;
+const AGENT_CACHE_VERSION: u32 = 10;
 
 /// On-disk cache entry for one parsed agent session file, keyed by the
 /// session file's (mtime, size). Reading back a stamp-matched blob is an
