@@ -231,9 +231,12 @@ function contentText(content) {
   return content.Text?.content || "";
 }
 
-// "codex/abc/1" → "codex"; "terminal/s/1" → "terminal".
+// "codex/abc/1" → "codex"; "desk:codex/abc/1" → "codex"; "terminal/s/1" → "terminal".
 function recordNamespace(record) {
-  return String(record.work_ref || "").split("/")[0] || "terminal";
+  const ref = String(record.work_ref || "");
+  const colon = ref.indexOf(":");
+  const path = colon >= 0 ? ref.slice(colon + 1) : ref;
+  return path.split("/")[0] || "terminal";
 }
 
 async function runSearch() {
