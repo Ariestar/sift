@@ -126,6 +126,39 @@ async function loadSessions({ append = false } = {}) {
   }
 }
 
+async function loadUsage() {
+  const total = $("usage-total");
+  const groups = $("usage-groups");
+  try {
+    const payload = await api("/api/v1/usage");
+    const summary = payload.summary;
+    total.textContent = `${summary.totals.cost} · ${summary.totals.requests} requests · ${summary.totals.unpriced_requests} unpriced`;
+    groups.replaceChildren();
+    for (const group of summary.groups.slice(-14).reverse()) {
+      groups.append(el("div", { class: "usage-row" }, [
+        el("span", { text: `${group.day} · ${group.provider} · ${group.model || "unknown"}` }),
+        el("span", { class: "meta", text: `${group.requests} · ${group.cost}` }),
+      ]));
+    }
+    if (payload.warnings.length) {
+      groups.append(el("div", { class: "warning", text: `${payload.warnings.length} source refresh warning(s)` }));
+    }
+  } catch (error) {
+    total.textContent = `Usage unavailable: ${error.message}`;
+  }
+}
+
+async function loadStats() {
+  const target = $("stats-summary");
+  try {
+    const payload = await api("/api/v1/stats");
+    const stats = payload.stats;
+    target.textContent = `${stats.sessions} sessions · ${stats.records} records · ${stats.active_days} active days · ${stats.starred_sessions} starred`;
+  } catch (error) {
+    target.textContent = `Stats unavailable: ${error.message}`;
+  }
+}
+
 async function openSession(provider, sessionId) {
   const { signal, token } = abort("detail");
   const detail = $("detail");
@@ -193,11 +226,14 @@ function partText(part) {
 async function runSearch() {
   const q = $("search").value.trim();
   const source = $("source").value;
+  const method = $("method").value;
   $("results").classList.toggle("hidden", !q && source === "all");
   $("results-head").classList.toggle("hidden", !q && source === "all");
   if (!q) return;
   const { signal, token } = abort("search");
   const params = new URLSearchParams({ q, source, limit: "50" });
+  if (method === "semantic") params.set("semantic", "true");
+  if (method === "hybrid") params.set("hybrid", "true");
   const list = $("results");
   list.replaceChildren(el("li", { class: "empty", text: "Searching…" }));
   let payload;
@@ -241,6 +277,9 @@ $("search").addEventListener("keydown", (event) => {
 $("source").addEventListener("change", () => {
   if ($("search").value.trim()) runSearch();
 });
+$("method").addEventListener("change", () => {
+  if ($("search").value.trim()) runSearch();
+});
 $("provider").addEventListener("change", () => {
   showSessionsPane();
   loadSessions();
@@ -256,6 +295,10 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadProviders().then(() => loadSessions()).catch((error) => {
-  $("sessions").replaceChildren(el("li", { class: "empty", text: `Failed to start: ${error.message}` }));
-});
+loadProviders()
+  .then(() => loadSessions())
+  .catch((error) => {
+    $("sessions").replaceChildren(el("li", { class: "empty", text: `Failed to start: ${error.message}` }));
+  });
+loadUsage();
+loadStats();

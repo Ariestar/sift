@@ -331,7 +331,7 @@ pub(super) fn dialogue_text_vim_view(text: String) -> VimView {
 mod tests {
     use super::*;
     use crate::tui::workspace::WorkspaceSource;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
         WorkSource, WorkTime,

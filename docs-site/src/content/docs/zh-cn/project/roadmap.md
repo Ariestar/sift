@@ -22,12 +22,12 @@ Reliable CLI
 | Track | 状态 | 目标结果 |
 | --- | --- | --- |
 | CLI foundation | 进行中 | 一个日常可用的 CLI,用于捕获、搜索、选择和导出终端与 agent 工作。 |
-| Agent support | 进行中 | 面向 AI Agent 对话记录的 provider-neutral 解析和浏览。 |
-| Retrieval quality | 下一步 | 结构化、精确、可排序的检索,决定证据范式是否真正好用。 |
+| Agent support | 核心已落地 | 面向 AI Agent 对话记录的 provider-neutral 解析和浏览。 |
+| Retrieval quality | 核心已落地 | 结构化、精确、可排序的检索,决定证据范式是否真正好用。 |
 | Skills and playbooks | 进行中 | 把 `sivtr` 作为统一记忆入口的可复用 Agent 流程。 |
-| Agent interfaces | 进行中 | CLI、MCP,以及后续本地 API / SDK,让其他 Agent 把 `sivtr` 当工作记忆基础设施。 |
+| Agent interfaces | 核心已落地 | CLI、MCP 和本地 Web API,让其他 Agent 把 `sivtr` 当工作记忆基础设施。 |
 | TUI workspace | 规划中 | 面向多 session、多 provider、长对话的高密度键盘优先界面。 |
-| Source expansion | 规划中 | 在不削弱共享模型的前提下,扩展到更多捕获面。 |
+| Source expansion | 核心已落地 | 在不削弱共享模型的前提下,扩展到更多捕获面。 |
 | Remote collaboration | 核心已落地 | 通过 Share / Grant / Mount 有权限地只读访问队友 workspace 记忆。 |
 | Privacy and lifecycle | 规划中 | 脱敏、保留、过期与选择性披露,避免敏感工作泄露或腐烂。 |
 | Provenance and trust | 规划中 | 可溯源、可版本化、可信任评分、可清理的记忆。 |
@@ -43,12 +43,12 @@ Reliable CLI
 - [x] 用 `sivtr run` 捕获子进程输出。
 - [x] 导入 shell session log。
 - [x] 按 selector 复制最近命令输入、输出和命令块。
-- [x] 用 SQLite 搜索保存过的输出 history。
+- [x] 在统一 archive 中搜索捕获输出。
 - [x] 为核心行为提供 TOML 配置。
-- [ ] 收紧 `copy`、`history`、`codex`、`hotkey` 和 workspace flows 的命名与选项一致性。
+- [x] 删除过时的 Codex mirror/export 路径,让命令命名围绕统一 archive。
 - [ ] 让 selector 和 filter 更容易在 shell 脚本中组合。
-- [ ] 强化大型本地 archive 的 import、export 和 search 行为。
-- [ ] 保持配置显式、可移植、适合安全共享。
+- [x] 强化本地 archive 的 import、export 和 search 行为。
+- [x] 保持配置显式、可移植、适合安全共享。
 
 ## Agent support
 
@@ -58,22 +58,22 @@ Agent session 是一等 memory source。产品目标是让 Agent transcript 像�
 - [x] 通过共享 helpers（JSONL / SQLite）解析 provider session 记录。
 - [x] 复制最新 user、assistant、tool、turn 或完整 session block。
 - [x] 通过 picker 浏览本地和镜像 session 目录。
-- [ ] 在共享 session-provider 接口后支持更多 agent provider。
-- [ ] 让 provider-specific parsing 与共享 selection、search、export 逻辑保持隔离。
-- [ ] 让 session discovery 在本地、镜像和共享 transcript 目录中更加稳健。
-- [ ] 在 CLI 命令、hotkey 和 TUI workspace 中一致暴露 provider selection。
-- [ ] 避免把数据模型绑定到单一 vendor 的 transcript 格式。
+- [x] 在共享 session-provider 接口后支持扩展的 provider catalog。
+- [x] 让 provider-specific parsing 与共享 selection、search、export 逻辑保持隔离。
+- [x] 让 session discovery 覆盖本地、容器和共享 transcript source。
+- [x] 在 CLI 命令、hotkey 和 TUI workspace 中一致暴露 provider selection。
+- [x] 避免把数据模型绑定到单一 vendor 的 transcript 格式。
 
 ## Retrieval quality
 
 检索质量决定证据范式是否真正好用。`sivtr` 应先把结构化搜索做硬,再叠加语义层。
 
-- [ ] 扩展搜索能力:明确 scope、literal / keyword / fuzzy 方法、source filter、ranking 和上下文丰富的机器可读结果。
-- [ ] 默认 progressive disclosure:先返回紧凑 ref,选中后再展开全文。
-- [ ] 改进 recency、status、provider、session、part-kind 排序,让高信号证据先出现。
-- [ ] 让搜索结果对脚本和 Agent 稳定:可确定排序、丰富 JSON、保留 WorkRef。
-- [ ] 增加评估 fixture 和 golden query,让检索改动可测量,而不只是凭感觉。
-- [ ] 把 semantic / vector search 当作这层基础之上的可选方法,而不是替代结构化过滤。
+- [x] 扩展搜索能力:明确 scope、source filter、ranking 和上下文丰富的机器可读结果。
+- [x] 默认 progressive disclosure:先返回紧凑 ref,选中后再展开全文。
+- [x] 改进 recency、status、provider、session、part-kind 排序,让高信号证据先出现。
+- [x] 让搜索结果对脚本和 Agent 稳定:可确定排序、丰富 JSON、保留 WorkRef。
+- [x] 增加评估 fixture 和 golden query,让检索改动可测量,而不只是凭感觉。
+- [x] 把 semantic / vector search 当作这层基础之上的可选方法,而不是替代结构化过滤。
 
 ## Skills and playbooks
 
@@ -92,11 +92,11 @@ Skill 让 Agent 可以把 `sivtr` 当成共享记忆入口。它们把通用 mem
 
 - [x] 覆盖 capture、search、show、filter、nav、zoom、copy 和 remote memory 的 CLI 表面。
 - [x] 只读 MCP server 与 host install 流程。
-- [ ] 围绕 WorkRef / WorkSet 语义和 progressive disclosure 稳定 MCP tool 契约。
-- [ ] 在需要时提供本地 developer API,支持程序化 query 和 export,而不必总 shell out。
+- [x] 围绕 WorkRef / WorkSet 语义和 progressive disclosure 稳定 MCP tool 契约。
+- [x] 提供本地 developer API,支持程序化 query、usage、stats 和 export,而不必总 shell out。
 - [ ] 等 CLI / MCP 契约稳定后再发布薄 SDK 或 client library。
-- [ ] 所有接口都以证据为先:返回 ref、provenance 和可选中的 part,而不是不透明 blob。
-- [ ] 优先本地、opt-in 服务,而不是默认常开的云端 endpoint。
+- [x] 所有接口都以证据为先:返回 ref、provenance 和可选中的 part,而不是不透明 blob。
+- [x] 优先本地、opt-in 服务,而不是默认常开的云端 endpoint。
 
 ## TUI workspace
 
@@ -116,12 +116,12 @@ TUI 应保持快速和键盘优先,但需要从单个输出浏览扩展到多 so
 
 更多平台应扩大捕获面,而不是切碎模型。新 source 必须映射进共享的 WorkRecord / WorkPart / WorkRef 抽象。
 
-- [ ] 在共享 provider 接口后接入更多 coding agent 和 IDE transcript。
+- [x] 在共享 provider 接口后接入更多 coding agent 和 IDE transcript。
 - [ ] 在现有 hook 模型不够用时,支持更多 shell 与终端捕获路径。
-- [ ] 仅在存在可持久本地 export 或 API 时,探索网页 AI 对话与协作工具 importer。
-- [ ] 优先 offline-first import 与本地索引,而不是去 scrape 脆弱的远程 UI。
-- [ ] 保持 provider adapter 很薄;search、privacy、ranking、export 继续共享。
-- [ ] 拒绝无法追溯到原始 session 或 artifact 的 source。
+- [x] 仅在存在可持久本地 export 时接入网页 AI 对话 importer（Claude.ai、ChatGPT JSON/ZIP）。
+- [x] 优先 offline-first import 与本地索引,而不是去 scrape 脆弱的远程 UI。
+- [x] 保持 provider adapter 很薄;search、privacy、ranking、export 继续共享。
+- [x] 拒绝无法追溯到原始 session 或 artifact 的 source。
 
 ## Remote collaboration
 
@@ -149,6 +149,7 @@ TUI 应保持快速和键盘优先,但需要从单个输出浏览扩展到多 so
 有权限分享还不够。记忆必须能安全保存、安全分享、也安全遗忘。
 
 - [x] remote share 路径默认 secret redaction。
+- [x] 在 archive 记录不暴露 secret 值的高风险发现。
 - [ ] 扩展 token、key、cookie、env dump 等高风险模式的脱敏规则。
 - [ ] 支持 private tag / exclude marker,让敏感片段永不进入持久索引。
 - [ ] 为本地 archive 与 shared mount 提供 retention / expiry 策略。
@@ -160,23 +161,23 @@ TUI 应保持快速和键盘优先,但需要从单个输出浏览扩展到多 so
 
 只有能验证来源、判断是否仍然有效的证据,才真正有用。
 
-- [ ] 在每个 record、part、summary、export 上保留 source provenance。
-- [ ] 跟踪 memory version,避免 re-import / re-parse 静默覆盖历史。
-- [ ] 附加 trust / freshness 信号,如 capture time、source reliability、supersession。
+- [x] 在每个 record、part、summary、export 上保留 source provenance。
+- [x] 只保留一个当前 derived archive projection;re-sync 原子替换 session,不维护平行 memory version。
+- [x] 附加 source stamp 与 sync status 等 freshness 信号。
 - [ ] 支持过期与隔离陈旧或被否定的记忆,避免旧数据污染检索。
-- [ ] 让 search 与 profile 表面展示足够 provenance,使人或 Agent 能回到原始证据。
+- [x] 让 search 与 profile 表面展示足够 provenance,使人或 Agent 能回到原始证据。
 - [ ] 优先可引用的 WorkRef,而不是漂浮的再生 summary。
 
 ## Semantic and multimodal memory
 
 语义与多模态检索能抬高上限,但前提是结构化证据搜索已经足够强。
 
-- [ ] 可选的本地 vector / embedding index,作为 literal、keyword、fuzzy 之外的一种搜索方法。
-- [ ] 保持 hybrid retrieval:先结构化过滤,再语义排序。
-- [ ] 不强制云端 embedding provider;仅支持本地或用户自选后端。
+- [x] 可选的本地 vector / embedding index,作为 literal 与结构化 ranking 之外的一种搜索方法。
+- [x] 保持 hybrid retrieval:先结构化过滤,再语义排序。
+- [x] 不强制云端 embedding provider;仅支持本地或用户自选后端。
 - [ ] 仅为可被稳定 ref 寻址、之后能重新打开的多模态 artifact 建索引。
 - [ ] 支持定位历史图像等非文本 artifact,同时不丢掉文本 provenance。
-- [ ] 永远不让 embedding 成为唯一真相;原始 record 仍是权威源。
+- [x] 永远不让 embedding 成为唯一真相;原始 record 仍是权威源。
 
 ## A2A messenger
 
@@ -217,7 +218,7 @@ Roadmap 不表示 `sivtr` 会变成:
 ## Principles
 
 - **Capture first.** 重要工作应该在发生时记录,而不是事后凭记忆重建。
-- **Local by default.** 个人 transcript 和 terminal history 应由用户控制,除非显式分享或导出。
+- **Local by default.** 个人 transcript 和 terminal record 应由用户控制,除非显式分享或导出。
 - **Provider-neutral.** Agent support 应通过可替换 provider 和稳定共享抽象实现。
 - **Evidence over paraphrase.** 优先可引用的原始 record 与 WorkRef,而不是不透明再生 summary。
 - **Structured search first.** 语义与多模态检索是加成,不是对精确 filter 与 ref 的替代。

@@ -1332,7 +1332,7 @@ mod tests {
         WorkspaceFocus, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{WorkAt, WorkRef};
     use sivtr_core::record::{
         WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkSessionRef,

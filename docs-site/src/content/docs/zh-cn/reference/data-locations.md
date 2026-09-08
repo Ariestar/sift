@@ -1,6 +1,6 @@
 ---
 title: 数据位置
-description: sivtr 存放配置、history、session log 和 provider 数据的位置。
+description: sivtr 存放配置、统一 archive、session log 和 provider 数据的位置。
 ---
 
 `sivtr` 是 local-first。它使用的大多数数据已经在你的机器上；它生成的数据默认写在平台配置或状态目录下，除非你显式导出到其他位置。
@@ -25,31 +25,10 @@ Shell 集成会写入按进程区分的结构化 session log。
 
 这些 log 支撑：
 
-- `sivtr import`；
+- `sivtr` workspace 浏览器；
 - `sivtr copy` 命令块工作流；
 - `sivtr diff`；
 - browser 中的命令块导航。
-
-## History 数据库
-
-当 `[history].auto_save = true` 时，捕获的终端输出会保存到本地 SQLite history 数据库。
-
-请通过 CLI 命令访问，而不是直接编辑数据库：
-
-```bash
-sivtr history list
-sivtr history search "panic"
-sivtr history show 42
-```
-
-保留策略由以下配置控制：
-
-```toml
-[history]
-max_entries = 0
-```
-
-`0` 表示不限制数量。
 
 ## Agent provider 数据
 
@@ -78,8 +57,7 @@ search、show、copy、picker、TUI 和 MCP 查询都从统一的本地 archive 
 | macOS | `~/Library/Application Support/sivtr/archive.db` |
 | Linux | `~/.config/sivtr/archive.db` |
 
-它是一个 SQLite 数据库（WAL 模式），由 sync 引擎写入：`sivtr sync` 显式执行一次同步，查询在 archive 比 `[sync].max_age_secs` 更旧时也会自动执行新鲜度同步。原生 Agent session 文件和 shell session log 仍是 source of truth：sync 引擎会读取它们；按 session 寻址的加载（show、zoom、copy 指定 ref）还具备自愈能力——当该 session 在 archive 中缺失或过期时，加载器会解析原生文件并重新归档。可用 `SIVTR_DATA_DIR` 覆盖根目录。
-
+它是一个 SQLite 数据库（WAL 模式），由 sync 引擎写入：`sivtr sync` 显式执行一次同步，查询在 archive 比 `[sync].max_age_secs` 更旧时也会自动执行新鲜度同步，`pipe`/`run` 也会直接写入一次性 terminal capture。原生 Agent session 文件和 shell session log 仍是 source of truth，sync 引擎读取它们；当 session 在 archive 中缺失或过期时，按 session 寻址的加载会通过解析原生文件自愈。可用 `SIVTR_DATA_DIR` 覆盖根目录。
 ## 生成的启动器
 
 Linux shortcut generation 会写入：

@@ -99,7 +99,7 @@ pub(super) fn new(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::ai::AgentProvider;
+    use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
         WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
         WorkSource, WorkTime,

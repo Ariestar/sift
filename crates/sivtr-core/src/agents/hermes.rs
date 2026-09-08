@@ -162,6 +162,7 @@ fn list_sqlite_sessions() -> Result<Vec<SessionInfo>> {
         let modified = system_time_from_unix_secs(ended_at.unwrap_or(started_at));
         sessions.push(SessionInfo {
             path: sqlite_session_path(&id),
+            physical_path: Some(db_path.clone()),
             id: Some(id),
             cwd: non_empty_opt(cwd),
             title,

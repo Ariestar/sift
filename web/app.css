@@ -95,6 +95,13 @@ select {
 .item .title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .meta { color: var(--muted); font-size: 12px; }
 #detail { padding: 0 20px 40px; }
+.usage-summary { padding: 0 14px 14px; border-bottom: 1px solid var(--border); }
+.usage-total { padding: 0 8px 8px; font-weight: 600; }
+.usage-groups { display: grid; gap: 3px; }
+.usage-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; color: var(--text); font-size: 12px; }
+.usage-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warning { color: var(--error); padding: 6px 8px; font-size: 12px; }
+.stats-summary { padding: 8px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); }
 .session-head { padding: 16px 0 8px; }
 .session-head h2 { margin: 0 0 4px; font-size: 17px; }
 .session-head .meta { color: var(--muted); font-size: 12px; }

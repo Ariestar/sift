@@ -10,6 +10,8 @@
 //! incremental re-syncs.
 
 pub mod schema;
+pub mod semantic;
+pub mod stats;
 pub mod store;
 pub mod sync;
 

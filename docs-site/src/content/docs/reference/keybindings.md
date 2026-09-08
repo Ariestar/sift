@@ -3,7 +3,7 @@ title: Keybindings
 description: Workspace picker, content, search, line filter, and Vim-view keybindings.
 ---
 
-This page documents the workspace picker TUI (the default `sivtr` interface). The single-buffer browser that `pipe`/`run`/`import` used was removed — those commands now write to history and open the external editor.
+This page documents the workspace picker TUI (the default `sivtr` interface). The single-buffer browser that `pipe`/`run`/`import` used was removed — those commands now write to the unified archive and open the external editor.
 
 ## Workspace picker
 

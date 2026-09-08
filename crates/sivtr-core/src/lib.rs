@@ -1,11 +1,9 @@
 pub mod agents;
-pub mod ai;
 pub mod archive;
 pub mod cache;
 pub mod capture;
 pub mod config;
 pub mod export;
-pub mod history;
 pub mod origin;
 pub mod privacy;
 pub mod publication;
@@ -15,6 +13,7 @@ pub mod search;
 pub mod session;
 pub mod session_source;
 pub mod time;
+pub mod usage;
 pub mod workset;
 pub mod workspace;
 

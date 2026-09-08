@@ -28,6 +28,8 @@ sivtr mcp install -y
 | `sivtr_zoom` | Neighboring record context |
 | `sivtr_filter` | Narrow `@last` or a saved set |
 | `sivtr_status` | Hooks, providers, daemon, local workspace origins (`ws`), remotes, vars |
+| `sivtr_usage` | Token usage and exact model costs from the archive |
+| `sivtr_stats` | Archive activity, quality findings, and usage statistics |
 
 Fall back to CLI commands below when MCP is not configured.
 

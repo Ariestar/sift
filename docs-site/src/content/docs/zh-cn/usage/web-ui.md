@@ -21,7 +21,8 @@ sivtr web
 ## 使用 UI
 
 - **Session 浏览器** — 按 provider 过滤 session、打开一个 session、复制它的 refs，供 `sivtr show` 使用。
-- **搜索** — 在任意位置按 `/` 聚焦搜索框。带查询时各 source 按 BM25 排序；`source=all` 先拼 agent 列表再拼 terminal 列表。
+- **搜索** — 在任意位置按 `/` 聚焦搜索框；可以选择 BM25、semantic 或 hybrid 排序。BM25 按 source 排序；`source=all` 先拼 agent 列表再拼 terminal 列表。
+- **Usage 与活跃度** — dashboard 展示按 catalog 计算的 token 成本、未定价事件、archive 数量和活跃日期。
 
 ## JSON API
 
@@ -33,7 +34,9 @@ sivtr web
 | `GET /api/v1/providers` | 列出已注册 provider |
 | `GET /api/v1/sessions?provider=&limit=&offset=` | 列出 session，支持可选过滤 |
 | `GET /api/v1/sessions/{provider}/{session_id}` | 单个完整 session |
-| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=` | 全文搜索 |
+| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=&semantic=&hybrid=` | BM25、semantic 或 hybrid 搜索 |
+| `GET /api/v1/usage?provider=&session_id=&since=&until=` | Token 用量与成本 |
+| `GET /api/v1/stats?provider=&since=&until=` | 活跃度、结果、项目、隐私和 usage 统计 |
 
 ## 隐私
 

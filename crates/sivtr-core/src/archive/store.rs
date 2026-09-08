@@ -6,13 +6,18 @@
 //! row by session id *or* source path first, keeping one row per file even
 //! when the derived session id changes between parses.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 
 use crate::record::{WorkOutcome, WorkRecord};
+
+/// Virtual source-path prefix for one-shot terminal captures. These rows live
+/// in the terminal namespace but are not owned by the terminal log sync.
+pub const CAPTURE_SOURCE_PREFIX: &str = "capture://";
 
 /// Which blob column a load materializes: full part text or the stripped
 /// metadata view (mirrors [`crate::query::LoadMode`]).
@@ -46,21 +51,20 @@ pub struct SessionUpsert<'a> {
     pub title: Option<&'a str>,
     pub stamp: Stamp,
     pub records: &'a [WorkRecord],
+    pub usage_events: &'a [crate::usage::UsageEvent],
 }
 
 /// Insert or replace one session and its records. Returns `true` when a new
 /// row was created, `false` when an existing row (matched by session id or
-/// source path) was updated in place. The matched row adopts the upsert's
-/// session id, so a derived-id change on one file can never split into a
-/// second row later. The row write and the record replacement commit
-/// together: a failure mid-way leaves the previous session intact instead
-/// of a half-updated row the freshness stamp would then treat as current.
+/// source path) was updated in place. The session, records, findings, and
+/// usage events commit together so a failed write never stamps partial data.
 pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
     let (started_at, ended_at) = session_time_bounds(up.records);
     let cwd_norm = up
         .cwd
         .map(|cwd| crate::agents::normalize_path_for_match(Path::new(cwd)))
         .unwrap_or_default();
+    let project = project_from_cwd(up.cwd);
 
     let tx = conn
         .unchecked_transaction()
@@ -95,13 +99,12 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
         (Some(row), _) | (_, Some(row)) => Some(row),
         (None, None) => None,
     };
-
     let session_row = match existing_row {
         Some(row) => {
             tx.execute(
                 "UPDATE sessions SET session_id = ?2, source_path = ?3, cwd = ?4, cwd_norm = ?5,
                  workspace_key = ?6, title = ?7, started_at = ?8, ended_at = ?9, record_count = ?10,
-                 mtime_secs = ?11, mtime_nanos = ?12, size = ?13,
+                 project = ?11, mtime_secs = ?12, mtime_nanos = ?13, size = ?14,
                  synced_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                  WHERE id = ?1",
                 params![
@@ -115,6 +118,7 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                     started_at,
                     ended_at,
                     up.records.len() as i64,
+                    project,
                     up.stamp.0 as i64,
                     up.stamp.1 as i64,
                     up.stamp.2 as i64,
@@ -130,9 +134,9 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
         None => {
             tx.execute(
                 "INSERT INTO sessions (provider, session_id, source_path, cwd, cwd_norm,
-                 workspace_key, title, started_at, ended_at, record_count,
+                 workspace_key, title, started_at, ended_at, record_count, project,
                  mtime_secs, mtime_nanos, size, synced_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
                  strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                 params![
                     up.provider,
@@ -145,6 +149,7 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
                     started_at,
                     ended_at,
                     up.records.len() as i64,
+                    project,
                     up.stamp.0 as i64,
                     up.stamp.1 as i64,
                     up.stamp.2 as i64,
@@ -157,12 +162,69 @@ pub fn upsert_session(conn: &Connection, up: &SessionUpsert) -> Result<bool> {
     let inserted = existing_row.is_none();
 
     replace_records(&tx, session_row, up.records)?;
+    replace_secret_findings(&tx, session_row, up.records)?;
+    replace_usage_events(&tx, session_row, up.usage_events)?;
     tx.commit().context("Failed to commit archived session")?;
     Ok(inserted)
 }
 
-/// Replace one session's record rows inside the caller's transaction.
-fn replace_records(tx: &Connection, session_row: i64, records: &[WorkRecord]) -> Result<()> {
+/// Store output from `sivtr run` or `sivtr pipe` in the terminal archive.
+pub fn insert_terminal_capture(
+    command: Option<&str>,
+    output: &str,
+    cwd: &Path,
+    exit_code: Option<i32>,
+) -> Result<String> {
+    if output.trim().is_empty() {
+        anyhow::bail!("cannot archive empty terminal capture");
+    }
+
+    let session_id = format!("capture-{}", uuid::Uuid::new_v4());
+    let source_path = PathBuf::from(format!("{CAPTURE_SOURCE_PREFIX}{session_id}.jsonl"));
+    let cwd_text = cwd.to_string_lossy().into_owned();
+    let workspace_key = crate::workspace::repo_identity(cwd).unwrap_or_default();
+    let entry = crate::session::SessionEntry::new("", command.unwrap_or_default(), output)
+        .with_metadata(
+            Some(cwd_text.clone()),
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            exit_code,
+        );
+    let record = WorkRecord::terminal(&entry, &source_path, 0)
+        .ok_or_else(|| anyhow::anyhow!("terminal capture produced no record"))?;
+    let stamp = capture_stamp(output.len())?;
+    let conn = super::schema::open()?;
+    let usage_events = [];
+    upsert_session(
+        &conn,
+        &SessionUpsert {
+            provider: super::sync::TERMINAL_NAMESPACE,
+            session_id: &session_id,
+            source_path: &source_path,
+            cwd: Some(&cwd_text),
+            workspace_key: &workspace_key,
+            title: command.filter(|command| !command.trim().is_empty()),
+            stamp,
+            records: std::slice::from_ref(&record),
+            usage_events: &usage_events,
+        },
+    )?;
+    Ok(session_id)
+}
+
+fn capture_stamp(size: usize) -> Result<Stamp> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?;
+    Ok((
+        elapsed.as_secs(),
+        elapsed.subsec_nanos(),
+        u64::try_from(size).context("terminal capture is too large")?,
+    ))
+}
+
+/// Replace one session's record rows inside a transaction.
+fn replace_records(tx: &Transaction<'_>, session_row: i64, records: &[WorkRecord]) -> Result<()> {
     tx.execute("DELETE FROM records WHERE session_row = ?1", [session_row])
         .context("Failed to clear archived records")?;
     for record in records {
@@ -242,6 +304,13 @@ fn session_time_bounds(records: &[WorkRecord]) -> (Option<String>, Option<String
     (started, ended)
 }
 
+fn project_from_cwd(cwd: Option<&str>) -> String {
+    cwd.and_then(|cwd| cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// Look up one archived session by its source file and verify the stamp.
 /// `Ok(None)` means the file is missing or stale and must be re-synced.
 pub fn fresh_session_row(
@@ -284,9 +353,9 @@ pub fn load_records_by_path(
 ) -> Result<Option<Vec<WorkRecord>>> {
     let stamp = match crate::cache::file_stamp(source_path) {
         Some(stamp) => stamp,
-        // The source file is gone; the archived copy stays readable and a
-        // missing stamp must not force a parse error.
-        None => return load_records_by_row_lookup(conn, provider, source_path, mode),
+        // The source file is gone; the archived copy remains the authoritative
+        // retained record for this deleted source.
+        None => return load_records_for_deleted_source(conn, provider, source_path, mode),
     };
     let Some(session) = fresh_session_row(conn, provider, source_path, stamp)? else {
         return Ok(None);
@@ -294,9 +363,8 @@ pub fn load_records_by_path(
     load_records_by_row(conn, session.row_id, mode).map(Some)
 }
 
-/// Fallback for vanished source files: serve whatever is archived, so a
-/// deleted capture file does not erase the memory it holds.
-fn load_records_by_row_lookup(
+/// Serve retained records for a source that was deleted after ingestion.
+fn load_records_for_deleted_source(
     conn: &Connection,
     provider: &str,
     source_path: &Path,
@@ -440,6 +508,8 @@ pub struct SessionMeta {
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub record_count: i64,
+    pub project: String,
+    pub starred: bool,
 }
 
 /// Per-provider archive totals.
@@ -460,13 +530,13 @@ pub fn list_sessions_meta(
 ) -> Result<Vec<SessionMeta>> {
     let sql = match provider {
         Some(_) => {
-            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count, project, starred
              FROM sessions WHERE provider = ?1
              ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
              LIMIT ?2 OFFSET ?3"
         }
         None => {
-            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count, project, starred
              FROM sessions
              ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
              LIMIT ?1 OFFSET ?2"
@@ -482,6 +552,8 @@ pub fn list_sessions_meta(
             started_at: row.get(4)?,
             ended_at: row.get(5)?,
             record_count: row.get(6)?,
+            project: row.get(7)?,
+            starred: row.get::<_, i64>(8)? != 0,
         })
     };
     let rows = match provider {
@@ -492,6 +564,152 @@ pub fn list_sessions_meta(
             .query_map(params![limit, offset], map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?,
     };
+    Ok(rows)
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionRow {
+    pub row_id: i64,
+    pub provider: String,
+    pub session_id: String,
+    pub source_path: String,
+    pub project: String,
+    pub starred: bool,
+}
+
+pub fn list_session_rows(
+    conn: &Connection,
+    provider: Option<&str>,
+    session_id: Option<&str>,
+    starred: Option<bool>,
+) -> Result<Vec<SessionRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, provider, session_id, source_path, project, starred
+         FROM sessions
+         WHERE (?1 IS NULL OR provider = ?1)
+           AND (?2 IS NULL OR session_id = ?2)
+           AND (?3 IS NULL OR starred = ?3)
+         ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC",
+    )?;
+    let rows = stmt
+        .query_map(
+            params![provider, session_id, starred.map(i64::from)],
+            |row| {
+                Ok(SessionRow {
+                    row_id: row.get(0)?,
+                    provider: row.get(1)?,
+                    session_id: row.get(2)?,
+                    source_path: row.get(3)?,
+                    project: row.get(4)?,
+                    starred: row.get::<_, i64>(5)? != 0,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn remove_missing_sessions(
+    conn: &Connection,
+    provider: &str,
+    source_paths: &[String],
+) -> Result<usize> {
+    if source_paths.is_empty() {
+        return Ok(conn.execute(
+            "DELETE FROM sessions
+             WHERE provider = ?1 AND source_path NOT LIKE ?2",
+            params![provider, format!("{CAPTURE_SOURCE_PREFIX}%")],
+        )?);
+    }
+    let placeholders = std::iter::repeat_n("?", source_paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "DELETE FROM sessions
+         WHERE provider = ?1 AND source_path NOT LIKE ?2
+           AND source_path NOT IN ({placeholders})"
+    );
+    let capture_prefix = format!("{CAPTURE_SOURCE_PREFIX}%");
+    let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(source_paths.len() + 2);
+    values.push(&provider);
+    values.push(&capture_prefix);
+    for path in source_paths {
+        values.push(path);
+    }
+    Ok(conn.execute(&sql, rusqlite::params_from_iter(values))?)
+}
+
+pub fn set_session_starred(
+    conn: &Connection,
+    provider: &str,
+    session_id: &str,
+    starred: bool,
+) -> Result<()> {
+    let changed = conn.execute(
+        "UPDATE sessions SET starred = ?3 WHERE provider = ?1 AND session_id = ?2",
+        params![provider, session_id, i64::from(starred)],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("archived session `{provider}/{session_id}` was not found");
+    }
+    Ok(())
+}
+
+fn replace_secret_findings(
+    tx: &Transaction<'_>,
+    session_row: i64,
+    records: &[WorkRecord],
+) -> Result<()> {
+    let mut counts = std::collections::BTreeMap::<String, i64>::new();
+    for record in records {
+        let (_, report) = crate::privacy::redact_text_with_report(&record.combined_text())?;
+        for kind in report
+            .warnings
+            .into_iter()
+            .filter(|kind| !crate::privacy::is_manual_warning(kind))
+        {
+            *counts.entry(kind).or_default() += 1;
+        }
+    }
+    tx.execute(
+        "DELETE FROM secret_findings WHERE session_row = ?1",
+        [session_row],
+    )?;
+    for (kind, occurrences) in counts {
+        tx.execute(
+            "INSERT INTO secret_findings (session_row, kind, occurrences) VALUES (?1, ?2, ?3)",
+            params![session_row, kind, occurrences],
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SecretFinding {
+    pub provider: String,
+    pub session_id: String,
+    pub project: String,
+    pub kind: String,
+    pub occurrences: i64,
+}
+
+pub fn list_secret_findings(conn: &Connection) -> Result<Vec<SecretFinding>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.provider, s.session_id, s.project, f.kind, f.occurrences
+         FROM secret_findings f JOIN sessions s ON s.id = f.session_row
+         ORDER BY s.provider, s.session_id, f.kind",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SecretFinding {
+                provider: row.get(0)?,
+                session_id: row.get(1)?,
+                project: row.get(2)?,
+                kind: row.get(3)?,
+                occurrences: row.get(4)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -520,7 +738,7 @@ pub fn session_meta_by_key(
     session_id: &str,
 ) -> Result<Option<SessionMeta>> {
     conn.query_row(
-        "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+        "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count, project, starred
          FROM sessions WHERE provider = ?1 AND session_id = ?2",
         params![provider, session_id],
         |row| {
@@ -529,9 +747,11 @@ pub fn session_meta_by_key(
                 session_id: row.get(1)?,
                 title: row.get(2)?,
                 cwd: row.get(3)?,
-                started_at: row.get(4)?,
-                ended_at: row.get(5)?,
-                record_count: row.get(6)?,
+            started_at: row.get(4)?,
+            ended_at: row.get(5)?,
+            record_count: row.get(6)?,
+            project: row.get(7)?,
+            starred: row.get::<_, i64>(8)? != 0,
             })
         },
     )
@@ -558,6 +778,106 @@ pub fn load_records_by_key(
         Some(row) => load_records_by_row(conn, row, mode).map(Some),
         None => Ok(None),
     }
+}
+
+/// One raw usage event joined with its archive identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredUsageEvent {
+    pub provider: String,
+    pub session_id: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub occurred_at: Option<String>,
+    pub dedup_key: String,
+}
+
+/// Replace one session's usage events, deduplicating on `dedup_key` so a
+/// re-sync of the same transcript never doubles-bills.
+fn replace_usage_events(
+    tx: &Transaction<'_>,
+    session_row: i64,
+    events: &[crate::usage::UsageEvent],
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM usage_events WHERE session_row = ?1",
+        [session_row],
+    )
+    .context("Failed to clear archived usage events")?;
+    let mut seen = std::collections::HashSet::new();
+    for event in events {
+        if !event.dedup_key.is_empty() && !seen.insert(event.dedup_key.as_str()) {
+            continue;
+        }
+        let input_tokens = i64::try_from(event.input_tokens)
+            .context("input token count exceeds archive integer range")?;
+        let output_tokens = i64::try_from(event.output_tokens)
+            .context("output token count exceeds archive integer range")?;
+        let cache_read_tokens = i64::try_from(event.cache_read_tokens)
+            .context("cache-read token count exceeds archive integer range")?;
+        let cache_creation_tokens = i64::try_from(event.cache_creation_tokens)
+            .context("cache-creation token count exceeds archive integer range")?;
+        tx.execute(
+            "INSERT INTO usage_events (session_row, model, input_tokens, output_tokens,
+             cache_read_tokens, cache_creation_tokens, occurred_at, dedup_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                session_row,
+                event.model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                event
+                    .occurred_at
+                    .as_deref()
+                    .and_then(crate::time::normalize_timestamp),
+                event.dedup_key,
+            ],
+        )
+        .context("Failed to insert archived usage event")?;
+    }
+    Ok(())
+}
+
+/// Read raw usage events over optional provider/session and inclusive day
+/// bounds (`YYYY-MM-DD`). Ordering is stable for deterministic reports.
+pub fn load_usage_events(
+    conn: &Connection,
+    provider: Option<&str>,
+    session_id: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<Vec<StoredUsageEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.provider, s.session_id, u.model, u.input_tokens, u.output_tokens,
+                u.cache_read_tokens, u.cache_creation_tokens, u.occurred_at, u.dedup_key
+         FROM usage_events u JOIN sessions s ON s.id = u.session_row
+         WHERE (?1 IS NULL OR s.provider = ?1)
+           AND (?2 IS NULL OR s.session_id = ?2)
+           AND (?3 IS NULL OR date(u.occurred_at) >= date(?3))
+           AND (?4 IS NULL OR date(u.occurred_at) <= date(?4))
+         ORDER BY COALESCE(u.occurred_at, '') ASC, s.provider ASC,
+                  s.session_id ASC, u.id ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![provider, session_id, since, until], |row| {
+            Ok(StoredUsageEvent {
+                provider: row.get(0)?,
+                session_id: row.get(1)?,
+                model: row.get(2)?,
+                input_tokens: row.get::<_, i64>(3)? as u64,
+                output_tokens: row.get::<_, i64>(4)? as u64,
+                cache_read_tokens: row.get::<_, i64>(5)? as u64,
+                cache_creation_tokens: row.get::<_, i64>(6)? as u64,
+                occurred_at: row.get(7)?,
+                dedup_key: row.get(8)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// Read/write the archive_meta key/value table (sync bookkeeping).
@@ -632,6 +952,7 @@ mod tests {
             title: None,
             stamp: (100, 0, 42),
             records,
+            usage_events: &[],
         }
     }
 
@@ -682,9 +1003,7 @@ mod tests {
 
         let mut up = sample_upsert(&records);
         assert!(upsert_session(&conn, &up).unwrap(), "first insert");
-        // Same path, different derived id: updates in place and adopts the
-        // new id, so a later id+path change still finds this row instead of
-        // inserting a duplicate for the same file.
+        // Same path, different derived id: updates in place and adopts the id.
         up.session_id = "renamed";
         assert!(!upsert_session(&conn, &up).unwrap(), "path match updates");
         let saved: String = conn
@@ -694,8 +1013,8 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(saved, "renamed", "path match adopts the derived id");
-        // The renamed session's file moving keeps one row: id matches.
+        assert_eq!(saved, "renamed");
+        // Same id, different path: updates in place (row found by the id).
         let moved = Path::new("/repo/terminals/session_1_moved.jsonl");
         up.source_path = moved;
         // Different record content proves the UPDATE branch rewrites the
@@ -719,6 +1038,76 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1, "no duplicate rows");
+        std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    #[test]
+    fn terminal_capture_stays_in_archive_across_terminal_sync_cleanup() {
+        let _guard = crate::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        let cwd = dir.path().join("repo");
+        std::fs::create_dir(&cwd).unwrap();
+
+        let session_id =
+            insert_terminal_capture(Some("echo captured"), "captured", &cwd, Some(0)).unwrap();
+        let conn = crate::archive::open().unwrap();
+        let records = load_records_by_key(&conn, "terminal", &session_id, BlobMode::Full)
+            .unwrap()
+            .expect("capture is archived");
+        assert_eq!(records[0].session.id, session_id);
+        assert_eq!(records[0].parts[1].text(), "captured");
+
+        assert_eq!(remove_missing_sessions(&conn, "terminal", &[]).unwrap(), 0);
+        assert!(
+            load_records_by_key(&conn, "terminal", &session_id, BlobMode::Full)
+                .unwrap()
+                .is_some()
+        );
+        std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    #[test]
+    fn failed_session_upsert_rolls_back_metadata_and_records() {
+        let _guard = crate::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        let conn = crate::archive::open().unwrap();
+        let records = vec![terminal_record("session_1", 1, "original")];
+        let up = sample_upsert(&records);
+        assert!(upsert_session(&conn, &up).unwrap());
+
+        let events = vec![crate::usage::UsageEvent {
+            model: "gpt-5".into(),
+            input_tokens: u64::MAX,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            occurred_at: None,
+            dedup_key: "overflow".into(),
+        }];
+        let mut replacement = sample_upsert(&records);
+        replacement.stamp = (200, 0, 43);
+        replacement.usage_events = &events;
+        assert!(upsert_session(&conn, &replacement).is_err());
+
+        assert!(fresh_session_row(
+            &conn,
+            "terminal",
+            Path::new("/repo/terminals/session_1.jsonl"),
+            (100, 0, 42),
+        )
+        .unwrap()
+        .is_some());
+        let rows = load_records_by_path(
+            &conn,
+            "terminal",
+            Path::new("/repo/terminals/session_1.jsonl"),
+            BlobMode::Full,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(rows[0].parts[0].text(), "original");
         std::env::remove_var("SIVTR_DATA_DIR");
     }
 
@@ -763,6 +1152,60 @@ mod tests {
         assert_eq!(by(Some(Path::new("/repo-b"))), 1, "only unbound");
         assert_eq!(by(Some(Path::new("/scratch"))), 2, "exact match + unbound");
         assert_eq!(by(None), 3, "no cwd filter lists all");
+        std::env::remove_var("SIVTR_DATA_DIR");
+    }
+
+    #[test]
+    fn usage_events_round_trip_with_provider_and_session_filters() {
+        let _guard = crate::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        let conn = crate::archive::open().unwrap();
+        let records: Vec<WorkRecord> = Vec::new();
+        let mut up = sample_upsert(&records);
+        up.provider = "codex";
+        up.session_id = "session-1";
+        up.source_path = Path::new("/repo/codex/session-1.jsonl");
+        let events = vec![
+            crate::usage::UsageEvent {
+                model: "gpt-5".into(),
+                input_tokens: 2,
+                output_tokens: 3,
+                cache_read_tokens: 4,
+                cache_creation_tokens: 5,
+                occurred_at: Some("2026-08-30T00:00:00Z".into()),
+                dedup_key: "codex:a".into(),
+            },
+            crate::usage::UsageEvent {
+                model: "gpt-5".into(),
+                input_tokens: 6,
+                output_tokens: 7,
+                cache_read_tokens: 8,
+                cache_creation_tokens: 9,
+                occurred_at: Some("2026-08-31T00:00:00Z".into()),
+                dedup_key: "codex:b".into(),
+            },
+        ];
+        up.usage_events = &events;
+        upsert_session(&conn, &up).unwrap();
+
+        let loaded =
+            load_usage_events(&conn, Some("codex"), Some("session-1"), None, None).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].input_tokens, 2);
+        assert_eq!(loaded[1].dedup_key, "codex:b");
+        assert_eq!(
+            load_usage_events(&conn, Some("claude"), None, None, None)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            load_usage_events(&conn, Some("codex"), None, Some("2026-08-31"), None)
+                .unwrap()
+                .len(),
+            1
+        );
         std::env::remove_var("SIVTR_DATA_DIR");
     }
 }

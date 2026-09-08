@@ -16,6 +16,11 @@
       <option value="all:agent">agents</option>
       <option value="all:terminal">terminal</option>
     </select>
+    <select id="method" aria-label="Search method">
+      <option value="literal">BM25</option>
+      <option value="semantic">semantic</option>
+      <option value="hybrid">hybrid</option>
+    </select>
   </header>
   <main class="layout">
     <aside id="sessions-pane" class="pane">
@@ -26,6 +31,12 @@
       <ul id="sessions" class="list"></ul>
     </aside>
     <section id="content-pane" class="pane">
+      <section id="usage-summary" class="usage-summary">
+        <div class="pane-head"><span>Usage</span><span id="usage-updated" class="meta"></span></div>
+        <div id="usage-total" class="usage-total"></div>
+        <div id="usage-groups" class="usage-groups"></div>
+        <div id="stats-summary" class="stats-summary"></div>
+      </section>
       <div id="results-head" class="pane-head hidden"><span>Search results</span><button id="clear-search">clear</button></div>
       <ul id="results" class="list hidden"></ul>
       <div id="detail"></div>

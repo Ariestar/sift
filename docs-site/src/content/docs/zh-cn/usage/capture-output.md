@@ -1,6 +1,6 @@
 ---
 title: 捕获终端输出
-description: 使用 pipe mode、run mode 和 shell session import。
+description: 使用 pipe mode、run mode 和 shell session integration。
 ---
 
 捕获是把终端输出变成可复用文本的第一步。选择与你的需求匹配的最轻路径即可。
@@ -11,13 +11,13 @@ description: 使用 pipe mode、run mode 和 shell session import。
 | --- | --- | --- |
 | 查看已有命令管道的输出 | `command 2>&1 \| sivtr` | 否 |
 | 让 `sivtr` 执行一次命令 | `sivtr run command` | 部分保留本次运行信息 |
-| 打开当前 shell 记录的工作 | `sivtr import` | 是，需要 shell 集成 |
+| 浏览当前 workspace 记录的工作 | `sivtr` | 是，需要 shell 集成 |
 | 复制最近命令块 | `sivtr copy out` | 是，需要 shell 集成 |
-| 搜索保存过的输出历史 | `sivtr history search "query"` | 是，针对保存的捕获 |
+| 搜索捕获的终端和 AI 工作 | `sivtr search "query"` | 是，来自统一 archive |
 
 ## Pipe mode
 
-Pipe mode 读取 stdin，启用时写入历史，并用外部编辑器打开结果。
+Pipe mode 会把 stdin 写入统一 archive，并用外部编辑器打开结果。
 
 ```bash
 ls -la | sivtr
@@ -49,20 +49,20 @@ sivtr run git status --short
 适合在这些情况下使用：
 
 - 你希望 `sivtr` 执行并捕获单个命令；
-- 你希望编辑器打开前先报告退出状态并把输出存入历史；
+- 你希望编辑器打开前先报告退出状态并把输出存入统一 archive；
 - 你不想手动处理 shell 重定向。
 
-Run mode 会合并捕获 stdout 和 stderr，并把结果存入历史。如果命令没有输出，`sivtr` 会提示没有捕获内容后退出。
+Run mode 会合并捕获 stdout 和 stderr，并把结果存入统一 archive。如果命令没有输出，`sivtr` 会提示没有捕获内容后退出。
 
-## Shell session import
+## Shell session browsing
 
-Shell 集成会持续记录结构化命令条目。安装后打开当前 session log：
+Shell 集成会持续记录结构化命令条目。安装后打开 workspace 浏览器：
 
 ```bash
-sivtr import
+sivtr
 ```
 
-当你已经正常工作了一段时间，之后想在编辑器里打开累积的 session 时，这很有用。
+当你已经正常工作了一段时间，之后想浏览累积的终端工作时，这很有用。
 
 安装 shell 集成：
 
@@ -75,13 +75,11 @@ sivtr init nushell
 
 安装后重启 shell。
 
-## History capture
+## 搜索捕获输出
 
-当 `[history].auto_save` 启用时，捕获输出会保存到本地 history。稍后可以搜索：
+`pipe` 和 `run` 记录为 terminal session，与 shell 和 Agent session 使用同一个 `archive.db`。通过常规 archive 命令搜索或查看：
 
 ```bash
-sivtr history search "panic"
-sivtr history show 42
+sivtr search "panic"
+sivtr show terminal/<session>/<record>
 ```
-
-History 和当前 shell session log 是两套东西：history 是更长期的 SQLite 存储，session log 是按 shell 进程记录的近期结构化命令块。

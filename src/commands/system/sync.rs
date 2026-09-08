@@ -22,8 +22,8 @@ fn print_report(report: &SyncReport) {
     for source in &report.sources {
         let counts = &source.counts;
         let mut line = format!(
-            "{}: {} added, {} updated, {} unchanged",
-            source.source, counts.added, counts.updated, counts.unchanged
+            "{}: {} added, {} updated, {} removed, {} unchanged",
+            source.source, counts.added, counts.updated, counts.removed, counts.unchanged
         );
         if counts.failed > 0 {
             line.push_str(&format!(", {} failed", counts.failed));
@@ -79,6 +79,7 @@ mod tests {
             counts: sivtr_core::archive::sync::SyncCounts {
                 added,
                 updated,
+                removed: 0,
                 unchanged,
                 failed,
             },

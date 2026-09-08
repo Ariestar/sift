@@ -21,7 +21,8 @@ Then open <http://127.0.0.1:8080> in a browser.
 ## Using the UI
 
 - **Session browser** — filter sessions by provider, open a session, and copy its refs for use with `sivtr show`.
-- **Search** — press `/` anywhere to focus the search box. A query is BM25-ranked per source; `source=all` concatenates the agent list then the terminal list.
+- **Search** — press `/` anywhere to focus the search box; choose BM25, semantic, or hybrid ranking. BM25 is ranked per source; `source=all` concatenates the agent list then the terminal list.
+- **Usage and activity** — the dashboard shows catalog-priced token usage, unpriced events, archive counts, and active days.
 
 ## JSON API
 
@@ -33,7 +34,9 @@ The same surface is available as a read-only JSON API:
 | `GET /api/v1/providers` | List registered providers |
 | `GET /api/v1/sessions?provider=&limit=&offset=` | List sessions with optional filters |
 | `GET /api/v1/sessions/{provider}/{session_id}` | One full session |
-| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=` | Full-text search |
+| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=&semantic=&hybrid=` | BM25, semantic, or hybrid search |
+| `GET /api/v1/usage?provider=&session_id=&since=&until=` | Token usage and costs |
+| `GET /api/v1/stats?provider=&since=&until=` | Activity, outcomes, projects, privacy, and usage statistics |
 
 ## Privacy
 

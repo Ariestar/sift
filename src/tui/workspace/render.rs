@@ -987,7 +987,7 @@ mod tests {
         use super::session_row_line;
         use crate::tui::workspace::model::{WorkspaceSession, WorkspaceSource};
         use ratatui::prelude::Style;
-        use sivtr_core::ai::AgentProvider;
+        use sivtr_core::agents::AgentProvider;
         use std::time::SystemTime;
 
         let session = WorkspaceSession {

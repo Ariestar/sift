@@ -19,10 +19,6 @@ description: TOML configuration reference.
 [editor]
 command = "nvim"
 
-[history]
-auto_save = true
-max_entries = 0
-
 [sync]
 max_age_secs = 15
 
@@ -34,6 +30,12 @@ mode = "auto"
 
 [mcp]
 idle_exit_secs = 60
+
+[embedding]
+endpoint = "https://api.openai.com/v1/embeddings"
+model = "text-embedding-3-small"
+api_key_env = "OPENAI_API_KEY"
+batch_size = 64
 ```
 
 ## editor
@@ -56,19 +58,6 @@ command = "vim"
 command = "code --wait"
 ```
 
-## history
-
-```toml
-[history]
-auto_save = true
-max_entries = 0
-```
-
-| Key | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `auto_save` | boolean | `true` | Save captured output to history |
-| `max_entries` | integer | `0` | Maximum entries to retain. `0` means unlimited. |
-
 ## sync
 
 ```toml
@@ -79,6 +68,20 @@ max_age_secs = 15
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `max_age_secs` | integer | `15` | How stale the archive may be (seconds since the last sync) before a query triggers an incremental re-sync. `0` re-lists on every query. |
+
+## embedding
+
+```toml
+[embedding]
+endpoint = "https://api.openai.com/v1/embeddings"
+model = "text-embedding-3-small"
+api_key_env = "OPENAI_API_KEY"
+batch_size = 64
+```
+
+Semantic and hybrid search require an explicit OpenAI-compatible embeddings
+endpoint. The endpoint must use HTTPS, except for loopback HTTP during local
+development. If `api_key_env` is empty, no authorization header is sent.
 
 ## hotkey
 

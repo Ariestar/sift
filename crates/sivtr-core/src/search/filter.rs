@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::ai::{AgentProvider, AgentSessionProvider};
+use crate::agents::{AgentProvider, AgentSessionProvider};
 use crate::record::{
     WorkAt, WorkOutcome, WorkPart, WorkPartKind, WorkRecord, WorkRecordKind, WorkRef,
 };

@@ -5,23 +5,55 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentProvider {
+    Amp,
+    Aider,
+    Antigravity,
+    AntigravityCli,
+    ChatGpt,
     Claude,
+    ClaudeAi,
     Codex,
+    CommandCode,
+    Copilot,
     Cursor,
     Dsh,
+    DeepSeekTui,
+    Forge,
     Gemini,
+    GeminiApps,
     Goose,
+    Gptme,
     Grok,
     Hermes,
+    Iflow,
+    Kilo,
+    Kimi,
+    KimiWork,
+    Kiro,
     OpenClaw,
     OpenCode,
+    OpenHands,
     Pi,
+    Poolside,
+    PositAssistant,
     Qoder,
     QoderCn,
     Qwen,
+    QwenPaw,
+    Reasonix,
+    RooCode,
+    Shelley,
+    Trae,
+    TraeX,
+    Vibe,
+    VSCodeCopilot,
+    Windsurf,
     Zcode,
+    Zed,
+    Zencoder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -596,6 +628,7 @@ mod tests {
         let sessions = vec![
             SessionInfo {
                 path: PathBuf::from("unbound"),
+                physical_path: None,
                 id: Some("u".into()),
                 cwd: None,
                 title: None,
@@ -603,6 +636,7 @@ mod tests {
             },
             SessionInfo {
                 path: PathBuf::from("match"),
+                physical_path: None,
                 id: Some("m".into()),
                 cwd: Some(repo.to_string_lossy().into_owned()),
                 title: None,
@@ -610,6 +644,7 @@ mod tests {
             },
             SessionInfo {
                 path: PathBuf::from("other"),
+                physical_path: None,
                 id: Some("o".into()),
                 cwd: Some(dir.path().join("other").to_string_lossy().into_owned()),
                 title: None,
@@ -637,6 +672,7 @@ mod tests {
         // worktree, and one recorded in the worktree shows up from the main.
         let main_session = vec![SessionInfo {
             path: PathBuf::from("main-session"),
+            physical_path: None,
             id: Some("m".into()),
             cwd: Some(main.to_string_lossy().into_owned()),
             title: None,
@@ -649,6 +685,7 @@ mod tests {
 
         let worktree_session = vec![SessionInfo {
             path: PathBuf::from("wt-session"),
+            physical_path: None,
             id: Some("w".into()),
             cwd: Some(worktree.to_string_lossy().into_owned()),
             title: None,

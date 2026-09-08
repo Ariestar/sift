@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sivtr** is a terminal output workspace that captures, browses, searches, and reuses terminal command output and AI coding assistant sessions. Agent providers are registry-driven (Codex, Claude Code, Cursor, OpenCode, OpenClaw, Grok, Hermes, Pi, …) and four shells (Bash, Zsh, PowerShell, Nushell). Cross-device remote memory uses a local daemon with Share/Grant/Mount over encrypted iroh transport.
 
-Architecture: CLI binary (`src/`) wrapping a core library (`crates/sivtr-core/`). Clap-based subcommands for copy, search, show, work, filter, var, nav, zoom, init, diff, hotkey, doctor, serve, share, group, remote, peer, and workspace. TUI mode for browse/search views.
+Architecture: CLI binary (`src/`) wrapping a core library (`crates/sivtr-core/`). Native sources sync into one local archive; provider adapters only discover and parse, while CLI, TUI, MCP, Web API, and exports share the archive-backed record model. Clap-based subcommands cover capture, search, usage, stats, import/export, quality, sync, session labels, remote access, and diagnostics.
 
 ## Development Commands
 
@@ -29,6 +29,9 @@ crates/sivtr-core/src/     ← Core library (no CLI deps)
   agents/                  ← AgentProvider registry + per-provider parsers
     mod.rs / model.rs / jsonl.rs / sqlite.rs
     claude.rs / codex.rs / cursor.rs / grok.rs / hermes.rs / openclaw.rs / opencode.rs / pi.rs
+    generic.rs              ← shared adapters for the expanded provider catalog
+  archive/                 ← unified SQLite archive, sync, stats, embeddings
+  usage/                   ← token extraction, exact microdollar pricing
   record/
     model.rs               ← WorkRecord, WorkPart, WorkTime (canonical model)
     refs.rs                ← WorkRef parsing (local body + origin:body remote form)
@@ -38,7 +41,6 @@ crates/sivtr-core/src/     ← Core library (no CLI deps)
   workspace.rs             ← Workspace resolution (git root → sessions), data_dir()
   workset.rs               ← WorkSet / WorkSelection* canonical selection model
   config/                  ← SivtrConfig, serde TOML
-  history/                 ← SQLite command history
   session.rs               ← Session log reading
   time.rs                  ← Timestamp normalization
 src/                       ← CLI binary
@@ -47,10 +49,10 @@ src/                       ← CLI binary
     mod.rs                 ← Top-level Clap definitions (copy agents via registry external subcommand)
     remote.rs              ← serve/share/peer/remote/group/workspace Clap types
   commands/
-    capture/               ← copy, pipe, run, init, flush, import, diff, clear, browse
+    capture/               ← copy, pipe, run, init, flush, diff, clear, browse
     memory/                ← search, filter, var, nav, zoom, show, work, workset
     remote/                ← serve, share, mounts, peer, group, workspace
-    system/                ← config, doctor, history, hotkey, codex, migrate, version
+    system/                ← config, doctor, export, hotkey, import, quality, session, stats, sync, usage, version
   remote/                  ← Device daemon, identity, state, protocol, ipc
   tui/                     ← Terminal UI framework
 ```

@@ -278,6 +278,7 @@ fn push_session(
     sessions.push(SessionInfo {
         modified,
         path,
+        physical_path: None,
         id: meta.id,
         cwd: meta.cwd,
         title: meta.title,

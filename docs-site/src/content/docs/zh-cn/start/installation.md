@@ -176,7 +176,7 @@ cargo install --path . --force
 
 ## Shell 集成
 
-Shell 集成会记录最近的命令块，让 `sivtr copy`、`sivtr import` 和命令块导航有结构化数据可用。
+Shell 集成会记录最近的命令块，让 `sivtr copy` 和命令块导航有结构化数据可用。
 
 为你的 shell 安装 hook：
 

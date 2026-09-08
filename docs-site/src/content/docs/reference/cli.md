@@ -15,7 +15,7 @@ sivtr --all              # with bare TTY: also select remote mounts on open
 With no command:
 
 - **TTY** → multi-source workspace browser (Source / Sessions / Dialogues / Content).
-- **Piped stdin** → same as `sivtr pipe`: write to history and open the external editor.
+- **Piped stdin** → same as `sivtr pipe`: write to the unified archive and open the external editor.
 
 ## run
 
@@ -23,7 +23,7 @@ With no command:
 sivtr run <COMMAND> [ARGS...]
 ```
 
-Runs a command, captures combined stdout/stderr, reports the exit status, saves history when enabled, and opens the captured output in the external editor.
+Runs a command, captures combined stdout/stderr, reports the exit status, saves the capture to the unified archive, and opens it in the external editor.
 
 ```bash
 sivtr run cargo test
@@ -45,10 +45,12 @@ cargo build 2>&1 | sivtr
 ## import
 
 ```bash
-sivtr import
+sivtr import sessions --provider claude-ai <PATH>
+sivtr import sessions --provider chatgpt <PATH>
 ```
 
-Opens the current structured shell session log. Requires shell integration.
+The `sessions` subcommand imports a Claude.ai or ChatGPT JSON/ZIP export into
+the unified archive.
 
 ## init
 
@@ -226,6 +228,8 @@ Options:
 | --- | --- |
 | `QUERY` | Plain-text search query; BM25 ranks the source by these terms (no regex). Default sort becomes `relevance`. |
 | `--match <REGEX>`, `-m <REGEX>` | Case-insensitive regex that bounds the set before relevance ranking |
+| `--semantic` | Rank with the configured embedding service |
+| `--hybrid` | Fuse BM25 and embedding ranks with reciprocal rank fusion |
 | `--exclude <REGEX>`, `-v <REGEX>` | Case-insensitive exclusion filter applied after matches are found |
 | `--in <FIELD>`, `-i <FIELD>` | `content`, `title`, `session`, `input`, `output`, `command`, or `all`; default is `content` |
 | `--kind <KIND>` | Part kind filter: `prompt`, `command`, `user`, `assistant`, `tool`, `tool_call`, `tool_result`, `skill`, `thinking`, `output`, or `error` |
@@ -233,7 +237,7 @@ Options:
 | `--exit-code <CODE>` | Exact terminal process exit code |
 | `--min-duration <DURATION>` | Minimum command duration, e.g. `500ms`, `2s`, `1m` |
 | `--max-duration <DURATION>` | Maximum command duration |
-| `--sort <SORT>` | `newest` (default), `relevance` (default with a `QUERY` or `--match`), `oldest`, `duration`, `duration-asc`, `exit-code`, or `exit-code-asc` |
+| `--sort <SORT>` | `newest` (default), `relevance` (default with a `QUERY`), `oldest`, `duration`, `duration-asc`, `exit-code`, or `exit-code-asc` |
 | `--cwd <PATH>` | Workspace directory used to resolve records |
 | `--since <TIME>` | Only include records at or after this time |
 | `--until <TIME>` | Only include records at or before this time |
@@ -274,6 +278,7 @@ Benchmarks retrieval quality against golden queries: freezes the current workspa
 | --- | --- |
 | `--k <K>` | Evaluation depth (default `5`) |
 | `--sort <SORT>` | Sort strategy to benchmark (default `newest`) |
+| `--method <METHOD>` | `bm25`, `semantic`, or `hybrid` (default `bm25`; semantic methods require `[embedding]`) |
 | `--snapshot <PATH>` | Frozen eval snapshot file (queries + corpus JSON) |
 | `--create-snapshot <PATH>` | Dump current workspace records into a new snapshot (queries start empty) |
 | `--export <DIR>` | Write `qrels.txt` and `results.txt` (trec_eval format) into this directory |
@@ -710,6 +715,8 @@ Tools:
 | `sivtr_zoom` | Neighboring record context |
 | `sivtr_filter` | Narrow `@last` / `@name` / a source |
 | `sivtr_status` | Version, hooks, providers, daemon, `ws` local origins, remotes, vars |
+| `sivtr_usage` | Token usage, model pricing, and unpriced-event warnings |
+| `sivtr_stats` | Archive activity, projects, outcomes, privacy, and usage statistics |
 
 ### install / uninstall
 
@@ -832,22 +839,6 @@ One-command setup for a fresh install: detects the environment, installs shell h
 sivtr setup
 ```
 
-## history
-
-```bash
-sivtr history [COMMAND]
-```
-
-Subcommands:
-
-| Command | Meaning |
-| --- | --- |
-| `list [-l, --limit <N>]` | List recent entries |
-| `search <KEYWORD> [-l, --limit <N>]` | Search saved capture history |
-| `show <ID>` | Show a specific history entry |
-
-If no history subcommand is provided, `list` is used.
-
 ## config
 
 ```bash
@@ -923,7 +914,7 @@ Options:
 | Option | Meaning |
 | --- | --- |
 | `--full` | Re-parse every session, ignoring cached stamps |
-| `--json` | Print a machine-readable report with per-source counts (added / updated / unchanged / failed) |
+| `--json` | Print a machine-readable report with per-source counts (added / updated / removed / unchanged / failed) |
 
 Sync is incremental by default: each source file is compared against the archive by its stat stamp, and only changed files are re-parsed. Failures are per-source and reported, so one broken provider never hides the rest.
 
@@ -934,6 +925,56 @@ sivtr sync
 sivtr sync --full
 sivtr sync --json
 ```
+
+## usage
+
+```bash
+sivtr usage daily [--provider <PROVIDER>] [--since <DATE>] [--until <DATE>] [--breakdown] [--json]
+sivtr usage statusline [--provider <PROVIDER>] [--since <DATE>] [--until <DATE>]
+sivtr usage session <PROVIDER/SESSION> [--json]
+```
+
+Reports raw token usage and catalog-priced costs from the archive. Prices are
+computed with integer microdollars; unknown models and incomplete price data
+are reported as `unpriced`, never estimated.
+
+## stats
+
+```bash
+sivtr stats [--provider <PROVIDER>] [--since <DATE>] [--until <DATE>] [--json]
+```
+
+Reports session/record counts, activity days and hours, projects, outcomes,
+secret findings, starred sessions, and usage totals.
+
+## session
+
+```bash
+sivtr session star <PROVIDER/SESSION>
+sivtr session unstar <PROVIDER/SESSION>
+sivtr session list [--starred] [--json]
+```
+
+Star labels are stored in the archive and survive subsequent source syncs.
+
+## export
+
+```bash
+sivtr export sessions [--source <PROVIDER/SESSION>] [--format json|jsonl|markdown|html] [--output <PATH>]
+sivtr export sessions --jsonl --output sessions.jsonl
+```
+
+Exports one session or the archive without including secret values outside the
+records already stored locally. HTML output escapes transcript text.
+
+## quality
+
+```bash
+sivtr quality secrets [--json]
+```
+
+Lists secret-pattern findings recorded during sync without storing or printing
+the matched values.
 
 ## clear
 

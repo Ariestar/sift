@@ -75,11 +75,11 @@ sivtr search agent --match "panic" --format timeline
 
 | Layer | What it describes |
 | --- | --- |
-| What happened | Terminal output, command blocks, agent conversations, tool results, and local history. |
+| What happened | Terminal output, command blocks, agent conversations, and tool results in the local archive. |
 | How you reuse it | TUI browsing, search, copy, show, diff, skills, playbooks, named remotes, and memory variables like `@last`. |
 
 Terminal sources produce command blocks. Agent providers produce conversation blocks. Selectors like `1` and `2..4` pick recent items for copy commands. Search results can be saved as variables such as `@failures`, then shown, expanded, or piped into the next command.
 
 ## Local by default
 
-`sivtr` reads local shell logs, local history, and local agent transcripts. Cross-device access is opt-in through [Remote Access](/usage/remote-access/). See [Data Locations](/reference/data-locations/) for where records live.
+`sivtr` reads local shell logs and local agent transcripts into one archive. Cross-device access is opt-in through [Remote Access](/usage/remote-access/). See [Data Locations](/reference/data-locations/) for where records live.
