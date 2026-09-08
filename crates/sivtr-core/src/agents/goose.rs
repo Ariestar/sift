@@ -220,10 +220,9 @@ fn apply_message_rows(
         let content = match serde_json::from_str::<Value>(&content_json) {
             Ok(content) => content,
             Err(error) => {
-                eprintln!(
-                    "warning: failed to parse Goose message content for session {}: {error}",
-                    session_id
-                );
+                crate::diagnostics::warn(format!(
+                    "failed to parse Goose message content for session {session_id}: {error}"
+                ));
                 continue;
             }
         };

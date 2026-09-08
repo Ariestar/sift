@@ -348,6 +348,8 @@ pub(crate) struct WorkspaceView<'a> {
     pub(crate) content_at: Option<WorkAt>,
     pub(crate) show_help: bool,
     pub(crate) help_state: &'a ListState,
+    /// `!` diagnostics overlay (Option = closed), newest-last log snapshot.
+    pub(crate) diagnostics: Option<(&'a ListState, &'a [String])>,
     pub(crate) search: Option<WorkspaceSearchView<'a>>,
     pub(crate) line_filter_input_open: bool,
     pub(crate) line_filter: Option<&'a str>,

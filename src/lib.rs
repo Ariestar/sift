@@ -32,6 +32,7 @@ use std::process::ExitCode;
 
 /// Binary entry — keeps `main.rs` a one-liner so benches can depend on the lib.
 pub fn cli_main() -> ExitCode {
+    output::install_diagnostics_listener();
     tui::panic::install();
     match run() {
         Ok(()) => ExitCode::SUCCESS,

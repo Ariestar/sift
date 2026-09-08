@@ -78,6 +78,14 @@ impl Drop for Tui {
             let _ = restore_terminal_state(&mut state);
         }
         self.drawing_active = false;
+        // Claim "back on the normal screen" only when every cleanup step
+        // disarmed: a failed restore may leave the alternate screen up, and
+        // stderr diagnostics would paint over it.
+        let cleaned = !state.has_pending_cleanup();
+        drop(state);
+        if cleaned {
+            crate::output::set_tui_owns_screen(false);
+        }
     }
 }
 
@@ -198,6 +206,11 @@ pub fn init() -> Result<Tui> {
         #[cfg(windows)]
         synchronized_updates_supported,
     };
+    // Set only once the TUI is fully constructed: every failure path above
+    // now exits through `setup.fail` or `?` without leaving the flag latched.
+    // Warnings stay in the diagnostics ring while the UI is up (the `!`
+    // overlay shows them); stderr mirroring resumes on teardown.
+    crate::output::set_tui_owns_screen(true);
     Ok(tui)
 }
 /// Draw one TUI frame.
@@ -322,7 +335,15 @@ fn apply_full_redraw_policy(buffer: &mut Buffer) {
 pub fn restore(terminal: &mut Tui) -> Result<()> {
     terminal.drawing_active = false;
     let mut state = terminal.state.borrow_mut();
-    restore_terminal_state(&mut state)
+    let result = restore_terminal_state(&mut state);
+    // The terminal is genuinely back on the normal screen (suspend() will
+    // hand it to an external program): resume stderr diagnostics only once
+    // every cleanup step disarmed. `Tui::drop` re-checks on the way out, so
+    // leaving the flag set here is safe.
+    if result.is_ok() && !state.has_pending_cleanup() {
+        crate::output::set_tui_owns_screen(false);
+    }
+    result
 }
 
 /// Restore a terminal and preserve both the operation error and a cleanup error, if both occur.

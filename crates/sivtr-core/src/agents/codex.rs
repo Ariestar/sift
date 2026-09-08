@@ -28,10 +28,10 @@ impl AgentSessionProvider for CodexProvider {
             match list_recent_jsonl_sessions(PROVIDER_NAME, &root, cwd, parse_session_meta) {
                 Ok(mut root_sessions) => sessions.append(&mut root_sessions),
                 Err(error) => {
-                    eprintln!(
-                        "sivtr: warning: failed to read Codex session dir {}: {error:#}",
+                    crate::diagnostics::warn(format!(
+                        "failed to read Codex session dir {}: {error:#}",
                         root.display()
-                    );
+                    ));
                 }
             }
         }

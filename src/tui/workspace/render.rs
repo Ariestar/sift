@@ -194,6 +194,8 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
         );
     } else if view.show_help {
         render_help_panel(frame, chunks[0], view.help_state);
+    } else if let Some((state, log)) = view.diagnostics {
+        render_diagnostics_panel(frame, chunks[0], state, log);
     }
 }
 
@@ -610,6 +612,35 @@ fn render_help_panel(frame: &mut Frame, area: Rect, state: &ListState) {
         workspace_help_entries().len(),
         true,
     );
+}
+
+/// Full diagnostics history (`!`), newest last. Snapshot comes from the
+/// picker at paint, so warnings arriving while open appear live.
+fn render_diagnostics_panel(frame: &mut Frame, area: Rect, state: &ListState, log: &[String]) {
+    frame.render_widget(Clear, area);
+    let items = if log.is_empty() {
+        vec![ListItem::new(Line::styled(
+            "no warnings",
+            Style::default().fg(theme::muted()),
+        ))]
+    } else {
+        log.iter()
+            .map(|entry| {
+                ListItem::new(Line::styled(
+                    entry.clone(),
+                    Style::default().fg(theme::help_text()),
+                ))
+            })
+            .collect()
+    };
+    render_list_panel(
+        frame,
+        area,
+        Panel::new("!", "Diagnostics", true),
+        items,
+        state,
+    );
+    render_list_scrollbar(frame, area, selected_index(state), log.len(), true);
 }
 
 #[allow(clippy::too_many_arguments)]
