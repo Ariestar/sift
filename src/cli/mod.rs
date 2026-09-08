@@ -413,8 +413,8 @@ pub enum Commands {
     #[command(after_help = HOTKEY_AFTER_HELP)]
     Hotkey(HotkeyCommand),
 
-    /// Export local Codex session files into a shared read-only tree
-    Codex(CodexCommand),
+    /// Sync terminal and agent sessions into the unified archive
+    Sync(SyncArgs),
 
     /// Show version and build diagnostics
     Version(VersionArgs),
@@ -1165,39 +1165,15 @@ impl<'de> Deserialize<'de> for HotkeyProviderSelection {
     }
 }
 
-#[derive(Parser, Debug)]
-pub struct CodexCommand {
-    #[command(subcommand)]
-    pub action: CodexAction,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum CodexAction {
-    /// Export local Codex rollout JSONL files into a target directory
-    Export(CodexExportArgs),
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct CodexExportArgs {
-    /// Destination directory that will receive a sessions/ tree copy
-    #[arg(long, value_name = "PATH")]
-    pub dest: PathBuf,
-
-    /// Keep only the newest N session files; `0` means export all
-    #[arg(long, value_name = "N", default_value_t = 0)]
-    pub limit: usize,
-
-    /// Continue mirroring local sessions into the destination tree
+#[derive(Args, Debug)]
+pub struct SyncArgs {
+    /// Re-parse every session, ignoring cached fingerprints
     #[arg(long, default_value_t = false)]
-    pub watch: bool,
+    pub full: bool,
 
-    /// Maximum seconds between periodic reconciliation passes when `--watch` is enabled
-    #[arg(long, value_name = "SECONDS", default_value_t = 1, requires = "watch")]
-    pub interval: u64,
-
-    /// Maximum milliseconds between periodic reconciliation passes (overrides `--interval`)
-    #[arg(long, value_name = "MILLISECONDS", requires = "watch")]
-    pub interval_ms: Option<u64>,
+    /// Output structured JSON for agent/skill consumption
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[cfg(test)]
@@ -2268,59 +2244,15 @@ mod tests {
     }
 
     #[test]
-    fn codex_export_accepts_destination_and_watch_flags() {
-        let cli = Cli::try_parse_from([
-            "sivtr",
-            "codex",
-            "export",
-            "--dest",
-            "/tmp/shared-codex",
-            "--limit",
-            "5",
-            "--watch",
-            "--interval",
-            "3",
-        ])
-        .unwrap();
+    fn sync_accepts_full_and_json_flags() {
+        let cli = Cli::try_parse_from(["sivtr", "sync", "--full", "--json"]).unwrap();
 
         match cli.command {
-            Some(Commands::Codex(cmd)) => match cmd.action {
-                CodexAction::Export(args) => {
-                    assert_eq!(args.dest, PathBuf::from("/tmp/shared-codex"));
-                    assert_eq!(args.limit, 5);
-                    assert!(args.watch);
-                    assert_eq!(args.interval, 3);
-                    assert_eq!(args.interval_ms, None);
-                }
-            },
-            _ => panic!("expected codex export command"),
-        }
-    }
-
-    #[test]
-    fn codex_export_accepts_millisecond_interval() {
-        let cli = Cli::try_parse_from([
-            "sivtr",
-            "codex",
-            "export",
-            "--dest",
-            "/tmp/shared-codex",
-            "--watch",
-            "--interval-ms",
-            "250",
-        ])
-        .unwrap();
-
-        match cli.command {
-            Some(Commands::Codex(cmd)) => match cmd.action {
-                CodexAction::Export(args) => {
-                    assert_eq!(args.dest, PathBuf::from("/tmp/shared-codex"));
-                    assert!(args.watch);
-                    assert_eq!(args.interval, 1);
-                    assert_eq!(args.interval_ms, Some(250));
-                }
-            },
-            _ => panic!("expected codex export command"),
+            Some(Commands::Sync(args)) => {
+                assert!(args.full);
+                assert!(args.json);
+            }
+            _ => panic!("expected sync command"),
         }
     }
 

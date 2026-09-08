@@ -10,8 +10,8 @@ pub struct SivtrConfig {
     pub editor: EditorConfig,
     /// History settings.
     pub history: HistoryConfig,
-    /// Codex session settings.
-    pub codex: CodexConfig,
+    /// Unified archive sync settings.
+    pub sync: SyncConfig,
     /// Global hotkey settings.
     pub hotkey: HotkeyConfig,
     /// TUI theme settings.
@@ -41,12 +41,20 @@ pub struct HistoryConfig {
     pub max_entries: usize,
 }
 
-/// Codex session configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Unified archive sync settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct CodexConfig {
-    /// Additional directories that contain exported Codex session JSONL trees.
-    pub session_dirs: Vec<PathBuf>,
+pub struct SyncConfig {
+    /// How stale the archive may be (seconds since the last sync pass)
+    /// before a query triggers an incremental re-sync. `0` re-lists on
+    /// every query; raise it to trade freshness for latency.
+    pub max_age_secs: u64,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self { max_age_secs: 15 }
+    }
 }
 
 /// Global hotkey configuration.
@@ -208,19 +216,17 @@ mod tests {
     }
 
     #[test]
-    fn serializes_codex_config() {
+    fn serializes_sync_config() {
         let config = SivtrConfig {
-            codex: CodexConfig {
-                session_dirs: vec![PathBuf::from("/srv/sivtr/root-codex/sessions")],
-            },
+            sync: SyncConfig { max_age_secs: 120 },
             ..SivtrConfig::default()
         };
 
-        let toml = to_toml_string(&config).expect("serialize Codex config");
+        let toml = to_toml_string(&config).expect("serialize sync config");
 
-        assert!(toml.contains("[codex]"));
-        assert!(toml.contains("session_dirs = ["));
-        assert!(toml.contains("/srv/sivtr/root-codex/sessions"));
+        assert!(toml.contains("[sync]"));
+        assert!(toml.contains("max_age_secs = 120"));
+        assert_eq!(SivtrConfig::default().sync.max_age_secs, 15);
     }
 
     #[test]

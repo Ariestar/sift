@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod ai;
+pub mod archive;
 pub mod cache;
 pub mod capture;
 pub mod config;

@@ -150,30 +150,8 @@ sivtr show claude/<session>/<dialogue>
 sivtr show pi/<session>/<dialogue>/<line>
 ```
 
-## Codex session mirrors
+## The unified archive
 
-Codex supports exporting local rollout JSONL files into a shared read-only tree:
+Sessions from every registered provider are synced into one local SQLite archive (`archive.db`) alongside terminal captures. Queries run an automatic freshness pass, so new sessions show up without manual steps; `sivtr sync` forces a pass on demand.
 
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-```
-
-Then add the exported `sessions` directory to another account's config:
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-Shared/mirrored session trees only participate in explicit picker browsing. Implicit current-session lookup stays local so another account's exported history does not override your active workflow.
-
-On macOS, `/Users/Shared/sivtr/root-codex` is a good shared location between local accounts:
-
-```bash
-sivtr codex export --dest /Users/Shared/sivtr/root-codex --watch
-```
-
-```toml
-[codex]
-session_dirs = ["/Users/Shared/sivtr/root-codex/sessions"]
-```
+Cross-device sharing is opt-in and handled by Remote Access (`sivtr share` / `sivtr group`), not by exporting session trees. See [Remote Access](/usage/remote-access/).

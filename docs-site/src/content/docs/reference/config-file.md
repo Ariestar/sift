@@ -23,8 +23,8 @@ command = "nvim"
 auto_save = true
 max_entries = 0
 
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
+[sync]
+max_age_secs = 15
 
 [hotkey]
 chord = "alt+y"
@@ -69,20 +69,16 @@ max_entries = 0
 | `auto_save` | boolean | `true` | Save captured output to history |
 | `max_entries` | integer | `0` | Maximum entries to retain. `0` means unlimited. |
 
-## codex
+## sync
 
 ```toml
-[codex]
-session_dirs = []
+[sync]
+max_age_secs = 15
 ```
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `session_dirs` | string array | `[]` | Extra exported Codex `sessions` directories to browse with `copy codex --pick` |
-
-On macOS, a typical shared path is `/Users/Shared/sivtr/root-codex/sessions`.
-
-Only Codex mirrors are currently configured here. Other registered providers (Claude, Cursor, OpenCode, OpenClaw, Hermes, Grok, Pi, Dsh, Gemini, Goose, Qoder/Qoder-CN, Qwen, …) use their own local locations and environment signals.
+| `max_age_secs` | integer | `15` | How stale the archive may be (seconds since the last sync) before a query triggers an incremental re-sync. `0` re-lists on every query. |
 
 ## hotkey
 

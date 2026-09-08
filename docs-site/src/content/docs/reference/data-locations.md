@@ -68,22 +68,17 @@ max_entries = 0
 
 Provider formats differ; `sivtr` normalizes them into sessions and dialogue units for copy, picker, search, and show workflows.
 
-## Codex exported mirrors
+## Unified archive
 
-`codex export` writes a copy of local Codex session files into a destination you choose:
+Search, show, copy, picker, TUI, and MCP queries read from a unified local archive instead of parsing native session files on every query.
 
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-```
+| Platform | Path |
+| --- | --- |
+| Windows | `%APPDATA%\sivtr\archive.db` |
+| macOS | `~/Library/Application Support/sivtr/archive.db` |
+| Linux | `~/.config/sivtr/archive.db` |
 
-The destination receives a `sessions/` tree. Another account can read it by adding:
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-Use read-only permissions for shared mirrors when possible.
+It is a SQLite database (WAL mode) written by the sync engine: `sivtr sync` runs a pass explicitly, and queries run an automatic freshness pass when the archive is older than `[sync].max_age_secs`. Native agent session files and shell session logs remain the source of truth. The sync engine reads them, and session-addressed loads (show, zoom, copy of a specific ref) self-heal: when a session is missing or stale in the archive, the loader parses the native file and re-archives it. Override the root with `SIVTR_DATA_DIR`.
 
 ## Generated launchers
 

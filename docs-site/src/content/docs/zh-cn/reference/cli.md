@@ -888,34 +888,29 @@ sivtr hotkey status
 sivtr hotkey stop
 ```
 
-## codex export
+## sync
 
 ```bash
-sivtr codex export --dest <PATH> [OPTIONS]
+sivtr sync [--full] [--json]
 ```
 
-把本地 Codex rollout JSONL 文件导出到一个包含 `sessions/` 树的目标目录。
+把所有 Agent provider 的 session 和每个 workspace 的终端日志同步进统一的本地 archive（`archive.db`）。查询（search、show、copy、TUI、MCP）从这个 archive 读取；当 archive 比 `[sync].max_age_secs`（默认 `15` 秒）更旧时，查询会先触发一次增量同步。
 
 选项：
 
 | 选项 | 含义 |
 | --- | --- |
-| `--dest <PATH>` | 接收 `sessions/` 树的目标目录 |
-| `--limit <N>` | 只保留最新 N 个 session 文件；`0` 表示全部导出 |
-| `--watch` | 通过原生文件事件唤醒与周期 reconcile 持续 mirror 本地 session |
-| `--interval <SECONDS>` | 两次周期 reconcile 的最大秒数；默认 `1` |
-| `--interval-ms <MILLISECONDS>` | 两次周期 reconcile 的最大毫秒数；覆盖 `--interval` |
+| `--full` | 重新解析所有 session，忽略缓存的 stat stamp |
+| `--json` | 输出机器可读报告，包含每个 source 的计数（added / updated / unchanged / failed） |
 
-原生文件事件可以提前触发同步。原生 watcher 不可用或断开时，export 会回退到周期轮询。
-稳定文件不会重新发布；经过验证的追加增长只写入新增后缀。进程重启或文件系统迁移后，
-export 会先验证文件内容，再恢复增量写入。
+默认增量同步：用 stat stamp 把每个源文件与 archive 比对，只重新解析有变化的文件。失败按 source 单独上报，一个 provider 出错不会掩盖其余结果。
 
 示例：
 
 ```bash
-sivtr codex export --dest /srv/sivtr/root-codex
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-sivtr codex export --dest /srv/sivtr/root-codex --limit 100
+sivtr sync
+sivtr sync --full
+sivtr sync --json
 ```
 
 ## clear

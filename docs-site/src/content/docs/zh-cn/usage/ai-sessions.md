@@ -151,30 +151,8 @@ sivtr show pi/<session>/<dialogue>/<line>
 sivtr show terminal/current/<block>
 ```
 
-## Codex session mirror
+## 统一 archive
 
-Codex 支持把本地 rollout JSONL 文件导出为共享的只读树：
+所有已注册 provider 的 session 会和终端捕获一起同步进一个本地 SQLite archive（`archive.db`）。查询会自动执行新鲜度同步，新 session 无需手动操作就会出现；`sivtr sync` 可按需强制执行一次同步。
 
-```bash
-sivtr codex export --dest /srv/sivtr/root-codex --watch
-```
-
-然后在另一个账号的配置中加入导出的 `sessions` 目录：
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
-共享/镜像 session tree 只参与显式 picker 浏览。隐式当前 session 查找仍保持本地优先，避免另一个账号导出的历史覆盖你的当前工作流。
-
-在 macOS 上，`/Users/Shared/sivtr/root-codex` 适合作为本机多账号共享位置：
-
-```bash
-sivtr codex export --dest /Users/Shared/sivtr/root-codex --watch
-```
-
-```toml
-[codex]
-session_dirs = ["/Users/Shared/sivtr/root-codex/sessions"]
-```
+跨设备共享是 opt-in 的，由远程访问（`sivtr share` / `sivtr group`）处理，而不是导出 session 树。见[远程访问](/zh-cn/usage/remote-access/)。

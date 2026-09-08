@@ -76,23 +76,6 @@ sivtr copy pi --pick
 sivtr search agent --match "panic" --cwd /path/to/project --format timeline
 ```
 
-## `sivtr copy codex` 选中了错误账号的 session
-
-隐式当前 session 查找默认保持本地。来自 `[codex].session_dirs` 的共享 Codex mirror 只参与显式 picker 浏览。
-
-使用：
-
-```bash
-sivtr copy codex --pick
-```
-
-如果需要共享树，显式配置：
-
-```toml
-[codex]
-session_dirs = ["/srv/sivtr/root-codex/sessions"]
-```
-
 ## Linux 剪贴板复制失败
 
 剪贴板支持依赖桌面/session 环境。Wayland、X11、SSH 和 headless 环境行为可能不同。

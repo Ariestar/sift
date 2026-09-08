@@ -1,11 +1,13 @@
-//! Shared on-disk cache helpers for parsed agent data.
+//! Shared on-disk cache helpers.
 //!
-//! Both caches use the same stamp-validated pattern: a payload is stored
-//! alongside the source file's `(mtime, size)` fingerprint, and reads only
-//! pay the cost of re-parsing when the fingerprint no longer matches. The
-//! session record cache ([`crate::query`]) applies it to parse output; the
-//! listing cache ([`crate::agents::jsonl`]) applies it one level up so that
-//! session discovery is a stat sweep instead of a read + parse of every file.
+//! These caches use a stamp-validated pattern: a payload is stored alongside
+//! a source file's `(mtime, size)` fingerprint, and reads only pay the cost
+//! of recomputation when the fingerprint no longer matches. The listing
+//! cache ([`crate::agents::jsonl`]) applies it to session discovery so
+//! listing is a stat sweep, and the BM25 index cache
+//! ([`crate::search::index_cache`]) applies it to the search index keyed by
+//! the corpus fingerprint. Parsed records themselves live in the unified
+//! archive ([`crate::archive`]).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -27,22 +29,6 @@ pub fn file_stamp(path: &Path) -> Option<(u64, u32, u64)> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()?;
     Some((duration.as_secs(), duration.subsec_nanos(), meta.len()))
-}
-
-/// Cache file for one parsed session file, keyed by a namespace
-/// (`"terminal"`, `"pi"`, `"grok"`, …) and the source file path.
-pub fn session_cache_path(namespace: &str, path: &Path) -> PathBuf {
-    let mut hasher = DefaultHasher::new();
-    namespace.hash(&mut hasher);
-    path.hash(&mut hasher);
-    cache_dir().join(format!("sess-{:016x}.bin", hasher.finish()))
-}
-
-/// Cache file for one parsed session file's metadata view (part text
-/// omitted). Same key space as [`session_cache_path`] with a distinct suffix,
-/// so both views share one stamp-validated entry per session file.
-pub fn session_meta_cache_path(namespace: &str, path: &Path) -> PathBuf {
-    session_cache_path(namespace, path).with_extension("meta.bin")
 }
 
 /// Cache file for a BM25 index, keyed by the fingerprint of the record corpus
