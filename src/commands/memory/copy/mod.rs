@@ -19,9 +19,7 @@ use sivtr_core::record::WorkRecord;
 
 use crate::commands::browse;
 use crate::output;
-use crate::tui::workspace::{
-    WorkspaceFocus, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
-};
+use crate::tui::workspace::{WorkspaceFocus, WorkspaceSession, WorkspaceSource};
 
 use export::finish_units;
 use load::load_for_plan;
@@ -97,10 +95,7 @@ fn execute_pick(plan: &CopyPlan) -> Result<()> {
 
 fn session_source_from_records(records: &[WorkRecord]) -> Option<WorkspaceSource> {
     let record = records.first()?;
-    let kind = match record.work_ref.provider() {
-        Some(provider) => WorkspaceSourceKind::Agent(provider),
-        None => WorkspaceSourceKind::Terminal,
-    };
+    let kind = record.work_ref.provider();
     let Some(scope) = record.work_ref.scope_name() else {
         return Some(WorkspaceSource::local(kind));
     };

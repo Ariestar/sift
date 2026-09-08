@@ -1336,15 +1336,12 @@ mod tests {
     };
     use crate::tui::workspace::{
         ContentIoFocus, ContentScrolls, ListPane, Rows, TextPair, WorkspaceDialogue,
-        WorkspaceFocus, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
+        WorkspaceFocus, WorkspaceSession, WorkspaceSource,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{WorkAt, WorkRef};
-    use sivtr_core::record::{
-        WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-        RECORD_SCHEMA_VERSION,
-    };
+    use sivtr_core::record::{WorkRecord, WorkSessionRef, WorkTime, RECORD_SCHEMA_VERSION};
     use std::time::SystemTime;
 
     fn picked_units(picked: &PickedContent) -> Vec<TextPair> {
@@ -2611,30 +2608,18 @@ mod tests {
         plain: &str,
         index: usize,
     ) -> WorkRecord {
-        let (channel, provider, kind) = match source.kind {
-            WorkspaceSourceKind::Terminal => {
-                (WorkChannel::Terminal, None, WorkRecordKind::TerminalCommand)
-            }
-            WorkspaceSourceKind::Agent(provider) => (
-                WorkChannel::Chat,
-                Some(provider.command_name().to_string()),
-                WorkRecordKind::ChatTurn,
-            ),
-        };
         let work_ref = match source.kind {
-            WorkspaceSourceKind::Terminal => WorkRef::terminal("test", index + 1),
-            WorkspaceSourceKind::Agent(provider) => WorkRef::agent(provider, "test", index + 1),
+            None => WorkRef::terminal("test", index + 1),
+            Some(provider) => WorkRef::agent(provider, "test", index + 1),
         };
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: work_ref.clone(),
-            source: WorkSource { channel, provider },
             session: WorkSessionRef {
                 id: "test".to_string(),
                 canonical_id: Some("test-session-0123456789abcdef".to_string()),
                 path: None,
             },
-            kind,
             cwd: None,
             time: WorkTime::default(),
             status: None,

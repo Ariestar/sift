@@ -156,9 +156,7 @@ fn validate_selection(reference: &str, set: &WorkSet, selection: &WorkSetSelecti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::record::{
-        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{MessageRole, WorkRecord, WorkSessionRef, WorkTime};
 
     fn record(index: usize) -> WorkRecord {
         WorkRecord {
@@ -166,11 +164,6 @@ mod tests {
             work_ref: format!("terminal/session_1/{index}")
                 .parse()
                 .expect("valid work ref"),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: "session_1".to_string(),
                 canonical_id: Some("session_1".to_string()),
@@ -438,7 +431,7 @@ mod tests {
         let records = vec![record(1), record(2)];
         let target = WorkSelectionTarget::Scope {
             scope: sivtr_core::record::WorkScope::Local,
-            kind: WorkSelectionKind::Terminal,
+            kind: None,
             session: Some("session_1".to_string()),
         };
         let mut set = WorkSet::new(".", Vec::new());

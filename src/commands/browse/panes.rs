@@ -448,20 +448,13 @@ mod tests {
     use super::*;
     use crate::pane::Viewport;
     use sivtr_core::agents::AgentProvider;
-    use sivtr_core::record::{
-        WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{WorkRecord, WorkSessionRef, WorkTime};
     use std::time::UNIX_EPOCH;
 
     fn test_record(session: &str, index: usize, title: &str) -> WorkRecord {
         WorkRecord {
             schema_version: 2,
             work_ref: WorkRef::agent(AgentProvider::Codex, session, index),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: session.to_string(),
                 canonical_id: Some(session.to_string()),

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::agents::AgentProvider;
-use crate::record::{WorkPath, WorkRecord, WorkRecordIndex, WorkRef, WorkRefSelector};
+use crate::record::{WorkRecord, WorkRecordIndex, WorkRef, WorkRefSelector};
 use crate::session_source::{workspace_sources, SessionSource};
 
 /// Prefix of the error [`load_workspace_source`] raises when a selector
@@ -271,17 +271,13 @@ fn dedup_records(records: &mut Vec<WorkRecord>) {
 }
 
 fn record_identity_key(record: &WorkRecord) -> String {
-    match (&record.session.canonical_id, &record.work_ref.path) {
-        (Some(canonical_id), WorkPath::Terminal { index, .. }) => {
-            format!("terminal:{canonical_id}:{index}")
-        }
-        (
-            Some(canonical_id),
-            WorkPath::Agent {
-                provider, index, ..
-            },
-        ) => format!("{}:{canonical_id}:{index}", provider.command_name()),
-        (None, _) => record.work_ref.to_string(),
+    match &record.session.canonical_id {
+        Some(canonical_id) => format!(
+            "{}:{canonical_id}:{}",
+            record.work_ref.path.namespace(),
+            record.work_ref.path.index()
+        ),
+        None => record.work_ref.to_string(),
     }
 }
 
@@ -330,10 +326,7 @@ fn normalize_session_display_ids(records: &mut [WorkRecord]) {
 }
 
 fn session_source_key(reference: &WorkRef) -> String {
-    match &reference.path {
-        WorkPath::Terminal { .. } => "terminal".to_string(),
-        WorkPath::Agent { provider, .. } => format!("agent:{}", provider.command_name()),
-    }
+    reference.path.namespace().to_string()
 }
 
 fn compact_unique_session_id(canonical_id: &str, all_sessions: &[String]) -> String {
@@ -370,9 +363,8 @@ mod tests {
     use super::*;
     use crate::agents::{AgentBlock, AgentBlockKind, AgentSession};
     use crate::record::{
-        MessageRole, Projection, WorkActionStatus, WorkActor, WorkChannel, WorkContent,
-        WorkContentBlock, WorkPart, WorkPartBody, WorkRecordKind, WorkSessionRef, WorkSource,
-        WorkTarget, WorkTime,
+        MessageRole, Projection, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock,
+        WorkPart, WorkPartBody, WorkSessionRef, WorkTarget, WorkTime,
     };
     use crate::session_source::SessionInfo;
     use crate::test_fixtures::message_part;
@@ -557,11 +549,6 @@ mod tests {
         WorkRecord {
             schema_version: 1,
             work_ref: work_ref.clone(),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: display_id.to_string(),
                 canonical_id: canonical_id.map(str::to_string),

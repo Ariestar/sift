@@ -408,10 +408,7 @@ mod tests {
     use super::*;
     use crate::tui::content::io::ExpandedBlocks;
     use sivtr_core::agents::AgentProvider;
-    use sivtr_core::record::{
-        WorkChannel, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
-        RECORD_SCHEMA_VERSION,
-    };
+    use sivtr_core::record::{WorkRef, WorkSessionRef, WorkTime, RECORD_SCHEMA_VERSION};
 
     fn shell_action(seq: usize, command: &str, output: &str, exit: Option<i32>) -> WorkPart {
         let mut part = crate::test_fixtures::shell_action_part(
@@ -462,11 +459,6 @@ mod tests {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(AgentProvider::Codex, "session", 1),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some("codex".to_string()),
-            },
             session: WorkSessionRef {
                 id: "session".to_string(),
                 canonical_id: None,

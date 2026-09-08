@@ -8,7 +8,7 @@ use rusqlite::Connection;
 /// Archive schema version. Bump when a release changes the table layout in a
 /// way older rows cannot serve; the store then rebuilds from native sources
 /// on the next sync (the archive is derived state, so a rebuild is safe).
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Path of the archive database (`<data_dir>/archive.db`).
 pub fn db_path() -> PathBuf {
@@ -166,11 +166,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_mtime
 -- MessagePack record; `blob_light` is the metadata view with part text
 -- stripped (the light-load view). Part text lives inside the blob, so a
 -- re-sync that produces identical refs simply replaces rows in place.
+-- The terminal/agent kind is not stored: it derives from the record ref.
 CREATE TABLE IF NOT EXISTS records (
     id          INTEGER PRIMARY KEY,
     session_row INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     idx         INTEGER NOT NULL,
-    kind        TEXT NOT NULL,
     title       TEXT NOT NULL,
     started_at  TEXT,
     ended_at    TEXT,

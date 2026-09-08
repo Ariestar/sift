@@ -216,11 +216,27 @@ function renderRecord(record) {
 }
 
 function partText(part) {
-  switch (part.kind) {
-    case "tool_call": return JSON.stringify(part.input, null, 2) || "";
-    case "tool_result": return JSON.stringify(part.output, null, 2) || "";
-    default: return part.content || "";
+  if (part.kind === "action") {
+    const blocks = (part.output || []).map((block) => contentText(block.content));
+    if (blocks.length) return blocks.join("\n\n");
+    return contentText(part.input);
   }
+  return contentText(part.content);
+}
+
+function contentText(content) {
+  if (!content) return "";
+  // `WorkContent` serializes externally tagged: {"Text": {...}} | {"Json": ...}.
+  if (content.Json !== undefined) return JSON.stringify(content.Json, null, 2);
+  return content.Text?.content || "";
+}
+
+// "codex/abc/1" → "codex"; "desk:codex/abc/1" → "codex"; "terminal/s/1" → "terminal".
+function recordNamespace(record) {
+  const ref = String(record.work_ref || "");
+  const colon = ref.indexOf(":");
+  const path = colon >= 0 ? ref.slice(colon + 1) : ref;
+  return path.split("/")[0] || "terminal";
 }
 
 async function runSearch() {
@@ -251,7 +267,7 @@ async function runSearch() {
     return;
   }
   for (const record of payload.records) {
-    const open = () => openSession(record.source.provider || "terminal", record.session.canonical_id || record.session.id);
+    const open = () => openSession(recordNamespace(record), record.session.canonical_id || record.session.id);
     const item = el("li", {
       class: "item",
       role: "button",

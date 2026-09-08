@@ -2,9 +2,8 @@
 //! `pub` so sibling module trees (commands, tui) can reach it in tests.
 
 use sivtr_core::record::{
-    MessageRole, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock, WorkPart,
-    WorkPartBody, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTarget,
-    WorkTime, RECORD_SCHEMA_VERSION,
+    MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkPart,
+    WorkPartBody, WorkRecord, WorkRef, WorkSessionRef, WorkTarget, WorkTime, RECORD_SCHEMA_VERSION,
 };
 
 /// A message part of the given role — the shape every record test speaks in.
@@ -98,11 +97,6 @@ pub fn chat_record(index: usize, parts: Vec<WorkPart>) -> WorkRecord {
     WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref: WorkRef::agent(sivtr_core::agents::AgentProvider::Codex, "test", index),
-        kind: WorkRecordKind::ChatTurn,
-        source: WorkSource {
-            channel: WorkChannel::Chat,
-            provider: Some("codex".to_string()),
-        },
         session: WorkSessionRef {
             id: "test".to_string(),
             canonical_id: None,

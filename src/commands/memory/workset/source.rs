@@ -612,9 +612,7 @@ pub fn load_context_records(
 mod tests {
     use super::{merge_and_apply, resolve_source, split_group_scope, QueryTransport};
     use crate::commands::memory::workset::{QuerySourceResult, WorkSet};
-    use sivtr_core::record::{
-        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{MessageRole, WorkRecord, WorkSessionRef, WorkTime};
     use sivtr_core::search::Filter;
 
     fn record(index: usize) -> WorkRecord {
@@ -623,11 +621,6 @@ mod tests {
             work_ref: format!("terminal/session_1/{index}")
                 .parse()
                 .expect("valid work ref"),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
             session: WorkSessionRef {
                 id: "session_1".to_string(),
                 canonical_id: Some("session_1".to_string()),

@@ -13,16 +13,11 @@ use crate::commands::memory::show;
 use crate::commands::memory::work_json::{session_meta, WorkJsonSessionMeta};
 use crate::commands::memory::workset;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkSessionSource {
-    Terminal,
-    Agent(AgentProvider),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkSessionMarker {
     scope: Option<String>,
-    source: WorkSessionSource,
+    /// `None` = terminal stream, `Some` = the agent provider.
+    provider: Option<AgentProvider>,
     session: String,
 }
 
@@ -130,7 +125,7 @@ fn build_session_items(records: &[WorkRecord]) -> Vec<WorkSessionListItem> {
         positions.insert(group_key, items.len());
         items.push(WorkSessionListItem {
             ref_: display_ref,
-            source: marker.source_name().to_string(),
+            source: WorkPath::namespace_for(marker.provider).to_string(),
             session: marker.session,
             session_meta: session_meta(record),
             timestamp: record.time.primary_at().map(str::to_string),
@@ -182,26 +177,10 @@ fn timestamp_tag(timestamp: Option<&str>) -> String {
 
 impl WorkSessionMarker {
     fn from_record(record: &WorkRecord) -> Self {
-        match &record.work_ref.path {
-            WorkPath::Terminal { session, .. } => Self {
-                scope: record.work_ref.scope_name().map(str::to_string),
-                source: WorkSessionSource::Terminal,
-                session: session.clone(),
-            },
-            WorkPath::Agent {
-                provider, session, ..
-            } => Self {
-                scope: record.work_ref.scope_name().map(str::to_string),
-                source: WorkSessionSource::Agent(*provider),
-                session: session.clone(),
-            },
-        }
-    }
-
-    fn source_name(&self) -> &'static str {
-        match self.source {
-            WorkSessionSource::Terminal => "terminal",
-            WorkSessionSource::Agent(provider) => provider.command_name(),
+        Self {
+            scope: record.work_ref.scope_name().map(str::to_string),
+            provider: record.work_ref.provider(),
+            session: record.work_ref.session().to_string(),
         }
     }
 }
@@ -211,16 +190,19 @@ impl fmt::Display for WorkSessionMarker {
         if let Some(scope) = self.scope.as_deref() {
             write!(formatter, "{scope}:")?;
         }
-        write!(formatter, "{}/{}", self.source_name(), self.session)
+        write!(
+            formatter,
+            "{}/{}",
+            WorkPath::namespace_for(self.provider),
+            self.session
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sivtr_core::record::{
-        MessageRole, WorkChannel, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
-    };
+    use sivtr_core::record::{MessageRole, WorkRef, WorkSessionRef, WorkTime};
 
     #[test]
     fn session_markers_preserve_scope() {
@@ -279,21 +261,6 @@ mod tests {
         WorkRecord {
             schema_version: sivtr_core::record::RECORD_SCHEMA_VERSION,
             work_ref: work_ref.clone(),
-            kind: if matches!(work_ref.path, WorkPath::Terminal { .. }) {
-                WorkRecordKind::TerminalCommand
-            } else {
-                WorkRecordKind::ChatTurn
-            },
-            source: WorkSource {
-                channel: if matches!(work_ref.path, WorkPath::Terminal { .. }) {
-                    WorkChannel::Terminal
-                } else {
-                    WorkChannel::Chat
-                },
-                provider: work_ref
-                    .provider()
-                    .map(|provider| provider.command_name().to_string()),
-            },
             session: WorkSessionRef {
                 id: work_ref.session().to_string(),
                 canonical_id: Some(format!("{}-session-0123456789abcdef", work_ref.session())),
