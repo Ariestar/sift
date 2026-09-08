@@ -909,7 +909,9 @@ mod tests {
     fn terminal_record(session: &str, index: usize, content: &str) -> WorkRecord {
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
-            work_ref: format!("terminal/{session}/{index}").parse().unwrap(),
+            work_ref: format!("terminal/{session}/{index}")
+                .parse()
+                .expect("parse terminal work ref"),
             session: WorkSessionRef {
                 id: session.to_string(),
                 canonical_id: Some(session.to_string()),

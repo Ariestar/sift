@@ -584,10 +584,12 @@ mod tests {
     #[test]
     fn sync_session_derives_id_from_canonical_records() {
         use crate::record::WorkSessionRef;
-        let file = tempfile::NamedTempFile::new().unwrap();
+        let file = tempfile::NamedTempFile::new().expect("create temporary session file");
         let record = WorkRecord {
             schema_version: crate::record::RECORD_SCHEMA_VERSION,
-            work_ref: "codex/canonical-id/1".parse().unwrap(),
+            work_ref: "codex/canonical-id/1"
+                .parse()
+                .expect("parse codex work ref"),
             session: WorkSessionRef {
                 id: "canonical-id".into(),
                 canonical_id: Some("canonical-id".into()),
