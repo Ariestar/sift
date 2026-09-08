@@ -3,8 +3,23 @@
 
 const $ = (id) => document.getElementById(id);
 
-async function api(path) {
-  const response = await fetch(path);
+const PAGE = 200;
+const inflight = { sessions: 0, search: 0, detail: 0 };
+const controllers = { sessions: null, search: null, detail: null };
+
+function abort(key) {
+  controllers[key]?.abort();
+  controllers[key] = new AbortController();
+  inflight[key] += 1;
+  return { signal: controllers[key].signal, token: inflight[key] };
+}
+
+function stillCurrent(key, token) {
+  return inflight[key] === token;
+}
+
+async function api(path, signal) {
+  const response = await fetch(path, signal ? { signal } : undefined);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `${response.status} ${response.statusText}`);
@@ -36,53 +51,94 @@ function shortText(value, max = 90) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+function activateOnEnter(node, action) {
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      action();
+    }
+  });
+}
+
 async function loadProviders() {
-  const providers = await api("/api/v1/providers");
-  const select = $("provider");
-  for (const item of providers) {
-    select.append(
-      el("option", { value: item.provider, text: `${item.provider} (${item.sessions})` })
-    );
+  const list = $("sessions");
+  try {
+    const providers = await api("/api/v1/providers");
+    const select = $("provider");
+    for (const item of providers) {
+      select.append(
+        el("option", { value: item.provider, text: `${item.provider} (${item.sessions})` })
+      );
+    }
+  } catch (error) {
+    list.replaceChildren(el("li", { class: "empty", text: `Failed to load providers: ${error.message}` }));
   }
 }
 
-async function loadSessions() {
+async function loadSessions({ append = false } = {}) {
+  const { signal, token } = abort("sessions");
   const provider = $("provider").value;
-  const params = new URLSearchParams({ limit: "200" });
-  if (provider) params.set("provider", provider);
-  const sessions = await api(`/api/v1/sessions?${params}`);
   const list = $("sessions");
-  list.replaceChildren();
-  if (!sessions.length) {
+  const offset = append ? list.querySelectorAll("li.item").length : 0;
+  const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) });
+  if (provider) params.set("provider", provider);
+  if (!append) {
+    list.replaceChildren(el("li", { class: "empty", text: "Loading…" }));
+  }
+  let sessions;
+  try {
+    sessions = await api(`/api/v1/sessions?${params}`, signal);
+  } catch (error) {
+    if (error.name === "AbortError" || !stillCurrent("sessions", token)) return;
+    list.replaceChildren(el("li", { class: "empty", text: `Failed to load sessions: ${error.message}` }));
+    return;
+  }
+  if (!stillCurrent("sessions", token)) return;
+  if (!append) list.replaceChildren();
+  list.querySelector("li.load-more")?.remove();
+  if (!append && !sessions.length) {
     list.append(el("li", { class: "empty", text: "No archived sessions yet. Run a command or use an agent, then wait for the next sync." }));
     return;
   }
   for (const session of sessions) {
-    list.append(
-      el("li", {
-        class: "item",
-        onclick: () => openSession(session.provider, session.session_id),
-      }, [
-        el("span", { class: "title", text: session.title || session.session_id }),
-        el("span", {
-          class: "meta",
-          text: `${session.provider} · ${session.record_count} records · ${fmtTime(session.ended_at || session.started_at)}`,
-        }),
-      ])
-    );
+    const open = () => openSession(session.provider, session.session_id);
+    const item = el("li", {
+      class: "item",
+      role: "button",
+      tabindex: "0",
+      onclick: open,
+    }, [
+      el("span", { class: "title", text: session.title || session.session_id }),
+      el("span", {
+        class: "meta",
+        text: `${session.provider} · ${session.record_count} records · ${fmtTime(session.ended_at || session.started_at)}`,
+      }),
+    ]);
+    activateOnEnter(item, open);
+    list.append(item);
+  }
+  if (sessions.length === PAGE) {
+    const more = el("li", { class: "item load-more", role: "button", tabindex: "0", text: "Load more" });
+    const load = () => loadSessions({ append: true });
+    more.addEventListener("click", load);
+    activateOnEnter(more, load);
+    list.append(more);
   }
 }
 
 async function openSession(provider, sessionId) {
+  const { signal, token } = abort("detail");
   const detail = $("detail");
   detail.replaceChildren(el("p", { class: "empty", text: "Loading…" }));
   let payload;
   try {
-    payload = await api(`/api/v1/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(sessionId)}`);
+    payload = await api(`/api/v1/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(sessionId)}`, signal);
   } catch (error) {
+    if (error.name === "AbortError" || !stillCurrent("detail", token)) return;
     detail.replaceChildren(el("p", { class: "empty", text: `Failed to load: ${error.message}` }));
     return;
   }
+  if (!stillCurrent("detail", token)) return;
   const { session, records } = payload;
   detail.replaceChildren();
   detail.append(
@@ -100,8 +156,18 @@ async function openSession(provider, sessionId) {
 }
 
 function renderRecord(record) {
+  const copy = () => navigator.clipboard?.writeText(record.work_ref);
+  const ref = el("span", {
+    class: "ref",
+    role: "button",
+    tabindex: "0",
+    text: record.work_ref,
+    title: "Click to copy ref",
+    onclick: copy,
+  });
+  activateOnEnter(ref, copy);
   const head = el("div", { class: "record-head" }, [
-    el("span", { class: "ref", text: record.work_ref, title: "Click to copy ref", onclick: () => navigator.clipboard?.writeText(record.work_ref) }),
+    ref,
     el("span", { text: fmtTime(record.time && (record.time.ended_at || record.time.started_at)) }),
   ]);
   const body = el("div");
@@ -130,30 +196,37 @@ async function runSearch() {
   $("results").classList.toggle("hidden", !q && source === "all");
   $("results-head").classList.toggle("hidden", !q && source === "all");
   if (!q) return;
+  const { signal, token } = abort("search");
   const params = new URLSearchParams({ q, source, limit: "50" });
+  const list = $("results");
+  list.replaceChildren(el("li", { class: "empty", text: "Searching…" }));
   let payload;
   try {
-    payload = await api(`/api/v1/search?${params}`);
+    payload = await api(`/api/v1/search?${params}`, signal);
   } catch (error) {
-    $("results").replaceChildren(el("li", { class: "empty", text: `Search failed: ${error.message}` }));
+    if (error.name === "AbortError" || !stillCurrent("search", token)) return;
+    list.replaceChildren(el("li", { class: "empty", text: `Search failed: ${error.message}` }));
     return;
   }
-  const list = $("results");
+  if (!stillCurrent("search", token)) return;
   list.replaceChildren();
   if (!payload.records.length) {
     list.append(el("li", { class: "empty", text: "No hits." }));
     return;
   }
   for (const record of payload.records) {
-    list.append(
-      el("li", {
-        class: "item",
-        onclick: () => openSession(record.source.provider || "terminal", record.session.canonical_id || record.session.id),
-      }, [
-        el("span", { class: "title", text: shortText(record.title) }),
-        el("span", { class: "meta", text: `${record.work_ref} · ${fmtTime(record.time && (record.time.ended_at || record.time.started_at))}` }),
-      ])
-    );
+    const open = () => openSession(record.source.provider || "terminal", record.session.canonical_id || record.session.id);
+    const item = el("li", {
+      class: "item",
+      role: "button",
+      tabindex: "0",
+      onclick: open,
+    }, [
+      el("span", { class: "title", text: shortText(record.title) }),
+      el("span", { class: "meta", text: `${record.work_ref} · ${fmtTime(record.time && (record.time.ended_at || record.time.started_at))}` }),
+    ]);
+    activateOnEnter(item, open);
+    list.append(item);
   }
 }
 
@@ -183,5 +256,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadProviders();
-loadSessions();
+loadProviders().then(() => loadSessions()).catch((error) => {
+  $("sessions").replaceChildren(el("li", { class: "empty", text: `Failed to start: ${error.message}` }));
+});

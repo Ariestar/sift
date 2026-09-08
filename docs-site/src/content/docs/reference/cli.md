@@ -901,9 +901,9 @@ Serves a local web UI and a read-only JSON API over the unified archive: a sessi
 | Option | Meaning |
 | --- | --- |
 | `--port <PORT>` | TCP port to bind (default `8080`) |
-| `--host <HOST>` | Bind address (default `127.0.0.1`, loopback only) |
+| `--host <HOST>` | Loopback bind address (default `127.0.0.1`). Non-loopback values are rejected. |
 
-The server validates the browser `Host` header to guard against DNS rebinding. It is read-only — no writes — and data never leaves the machine. See [Web UI](/usage/web-ui/).
+The server only binds loopback and validates the browser `Host` header to guard against DNS rebinding. It is read-only — no writes — and with a loopback bind, data never leaves the machine. See [Web UI](/usage/web-ui/).
 
 ```bash
 sivtr web

@@ -1174,7 +1174,8 @@ pub struct WebArgs {
     #[arg(long, value_name = "PORT", default_value_t = 8080)]
     pub port: u16,
 
-    /// Bind address; loopback by default so the UI is never exposed
+    /// Loopback bind address. Non-loopback values are rejected so the
+    /// unauthenticated archive UI cannot be exposed on the network.
     #[arg(long, value_name = "HOST", default_value = "127.0.0.1")]
     pub host: String,
 }

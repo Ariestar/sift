@@ -10,8 +10,8 @@
   <header class="topbar">
     <span class="brand">sivtr</span>
     <span class="brand-sub">unified memory</span>
-    <input id="search" type="search" placeholder="Search memory  ( / )" autocomplete="off" spellcheck="false">
-    <select id="source">
+    <input id="search" type="search" placeholder="Search memory  ( / )" autocomplete="off" spellcheck="false" aria-label="Search memory">
+    <select id="source" aria-label="Search source">
       <option value="all">all</option>
       <option value="all:agent">agents</option>
       <option value="all:terminal">terminal</option>
@@ -21,7 +21,7 @@
     <aside id="sessions-pane" class="pane">
       <div class="pane-head">
         <span>Sessions</span>
-        <select id="provider"><option value="">all providers</option></select>
+        <select id="provider" aria-label="Filter sessions by provider"><option value="">all providers</option></select>
       </div>
       <ul id="sessions" class="list"></ul>
     </aside>

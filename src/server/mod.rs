@@ -29,8 +29,23 @@ use crate::commands::memory::workset;
 #[folder = "web"]
 struct Assets;
 
+/// Loopback names `sivtr web` will bind. Anything else would expose the
+/// unauthenticated archive to the network; `guard_host` cannot prevent that
+/// because clients control the `Host` header.
+fn is_loopback_bind(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+}
+
 /// Serve the web UI until interrupted.
 pub fn execute(args: &WebArgs) -> Result<()> {
+    if !is_loopback_bind(&args.host) {
+        anyhow::bail!(
+            "sivtr web only binds loopback (127.0.0.1, localhost, ::1); got --host {}",
+            args.host
+        );
+    }
+    sivtr_core::archive::sync::ensure_fresh()
+        .context("Failed to refresh the archive before serving the web UI")?;
     let runtime = tokio::runtime::Runtime::new().context("Failed to start async runtime")?;
     runtime.block_on(serve(args.host.clone(), args.port))
 }
@@ -126,25 +141,62 @@ fn default_limit() -> i64 {
     100
 }
 
+const MAX_PAGE: i64 = 200;
+const MAX_SEARCH: usize = 200;
+
+fn page_bounds(limit: i64, offset: i64) -> Result<(i64, i64), Response> {
+    if limit < 0 || offset < 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "limit and offset must be >= 0" })),
+        )
+            .into_response());
+    }
+    Ok((limit.min(MAX_PAGE), offset))
+}
+
 async fn sessions(AxQuery(query): AxQuery<SessionsQuery>) -> Response {
+    let (limit, offset) = match page_bounds(query.limit, query.offset) {
+        Ok(bounds) => bounds,
+        Err(response) => return response,
+    };
     with_archive(|conn| {
         Ok(json!(store::list_sessions_meta(
             conn,
             query.provider.as_deref(),
-            query.limit,
-            query.offset
+            limit,
+            offset
         )?))
     })
 }
 
 async fn session_detail(AxPath((provider, session_id)): AxPath<(String, String)>) -> Response {
-    with_archive(|conn| {
-        let meta = store::session_meta_by_key(conn, &provider, &session_id)?
-            .ok_or_else(|| anyhow::anyhow!("no archived session `{provider}/{session_id}`"))?;
-        let records = store::load_records_by_key(conn, &provider, &session_id, BlobMode::Full)?
-            .unwrap_or_default();
-        Ok(json!({ "session": meta, "records": records }))
-    })
+    let result = sivtr_core::archive::open().and_then(|conn| {
+        Ok(
+            match store::session_meta_by_key(&conn, &provider, &session_id)? {
+                None => None,
+                Some(meta) => {
+                    let records =
+                        store::load_records_by_key(&conn, &provider, &session_id, BlobMode::Full)?
+                            .unwrap_or_default();
+                    Some(json!({ "session": meta, "records": records }))
+                }
+            },
+        )
+    });
+    match result {
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("no archived session `{provider}/{session_id}`") })),
+        )
+            .into_response(),
+        Ok(Some(value)) => Json(value).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{error:#}") })),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -158,9 +210,10 @@ struct SearchQuery {
 }
 
 async fn search(AxQuery(query): AxQuery<SearchQuery>) -> Response {
-    let limit = query.limit.unwrap_or(50);
+    let limit = query.limit.unwrap_or(50).min(MAX_SEARCH);
     let rank = query.q.clone().unwrap_or_default();
-    let sort = if query.q.is_some() {
+    let ranked = query.q.is_some();
+    let sort = if ranked {
         Sort::Relevance
     } else {
         Sort::Newest
@@ -203,7 +256,12 @@ async fn search(AxQuery(query): AxQuery<SearchQuery>) -> Response {
         };
         merged.extend(set.into_records());
     }
-    merged.sort_by(|a, b| b.time.primary_at().cmp(&a.time.primary_at()));
+    // A query is already BM25-ordered per source. Re-sorting the merged
+    // list by recency would throw that ranking away; `source=all` keeps
+    // each source's relevance order (agent, then terminal).
+    if !ranked {
+        merged.sort_by(|a, b| b.time.primary_at().cmp(&a.time.primary_at()));
+    }
     merged.truncate(limit);
     Json(json!({ "records": merged })).into_response()
 }
@@ -247,6 +305,19 @@ mod tests {
 
     fn test_router() -> Router {
         router(8080)
+    }
+
+    #[test]
+    fn execute_rejects_non_loopback_host() {
+        let args = crate::cli::WebArgs {
+            port: 8080,
+            host: "0.0.0.0".into(),
+        };
+        let error = execute(&args).expect_err("non-loopback bind must fail");
+        assert!(
+            error.to_string().contains("loopback"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[tokio::test]

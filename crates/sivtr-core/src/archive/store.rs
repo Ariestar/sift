@@ -462,14 +462,14 @@ pub fn list_sessions_meta(
         Some(_) => {
             "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
              FROM sessions WHERE provider = ?1
-             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC
+             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
              LIMIT ?2 OFFSET ?3"
         }
         None => {
             "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
              FROM sessions
-             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC
-             LIMIT ?2 OFFSET ?3"
+             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
+             LIMIT ?1 OFFSET ?2"
         }
     };
     let mut stmt = conn.prepare(sql)?;

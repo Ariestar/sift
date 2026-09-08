@@ -16,12 +16,12 @@ Then open <http://127.0.0.1:8080> in a browser.
 | Option | Meaning |
 | --- | --- |
 | `--port <PORT>` | TCP port to bind (default `8080`) |
-| `--host <HOST>` | Bind address (default `127.0.0.1`, loopback only) |
+| `--host <HOST>` | Loopback bind address (default `127.0.0.1`). Non-loopback values are rejected. |
 
 ## Using the UI
 
 - **Session browser** — filter sessions by provider, open a session, and copy its refs for use with `sivtr show`.
-- **Search** — press `/` anywhere to focus the search box; results are ranked by BM25 relevance.
+- **Search** — press `/` anywhere to focus the search box. A query is BM25-ranked per source; `source=all` concatenates the agent list then the terminal list.
 
 ## JSON API
 
@@ -33,10 +33,10 @@ The same surface is available as a read-only JSON API:
 | `GET /api/v1/providers` | List registered providers |
 | `GET /api/v1/sessions?provider=&limit=&offset=` | List sessions with optional filters |
 | `GET /api/v1/sessions/{provider}/{session_id}` | One full session |
-| `GET /api/v1/search?q=&source=all|all:agent|all:terminal|<selector>&limit=` | Full-text search |
+| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=` | Full-text search |
 
 ## Privacy
 
-The server binds to loopback by default, so the UI is only reachable from this machine. It is strictly read-only — no writes — and data never leaves the machine. The server also validates the browser `Host` header to guard against DNS rebinding.
+The server binds loopback only (`127.0.0.1`, `localhost`, `::1`). Non-loopback `--host` values are rejected, so the unauthenticated UI cannot be exposed on the network. It is strictly read-only — no writes — and with a loopback bind, data never leaves the machine. The server also validates the browser `Host` header to guard against DNS rebinding.
 
 Changing `--port` also changes the accepted `Host`, so requests must target the same `host:port` the server is bound to.

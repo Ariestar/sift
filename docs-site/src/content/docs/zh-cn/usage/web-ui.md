@@ -16,12 +16,12 @@ sivtr web
 | 选项 | 含义 |
 | --- | --- |
 | `--port <PORT>` | 要绑定的 TCP 端口（默认 `8080`） |
-| `--host <HOST>` | 绑定地址（默认 `127.0.0.1`，仅 loopback） |
+| `--host <HOST>` | 仅 loopback 绑定地址（默认 `127.0.0.1`）。非 loopback 值会被拒绝。 |
 
 ## 使用 UI
 
 - **Session 浏览器** — 按 provider 过滤 session、打开一个 session、复制它的 refs，供 `sivtr show` 使用。
-- **搜索** — 在任意位置按 `/` 聚焦搜索框；结果按 BM25 相关性排序。
+- **搜索** — 在任意位置按 `/` 聚焦搜索框。带查询时各 source 按 BM25 排序；`source=all` 先拼 agent 列表再拼 terminal 列表。
 
 ## JSON API
 
@@ -33,10 +33,10 @@ sivtr web
 | `GET /api/v1/providers` | 列出已注册 provider |
 | `GET /api/v1/sessions?provider=&limit=&offset=` | 列出 session，支持可选过滤 |
 | `GET /api/v1/sessions/{provider}/{session_id}` | 单个完整 session |
-| `GET /api/v1/search?q=&source=all|all:agent|all:terminal|<selector>&limit=` | 全文搜索 |
+| `GET /api/v1/search?q=&source=all\|all:agent\|all:terminal\|<selector>&limit=` | 全文搜索 |
 
 ## 隐私
 
-server 默认只绑定 loopback，因此 UI 只能从本机访问。它是严格只读的——不做任何写入——数据也不会离开本机。server 还会校验浏览器的 `Host` header，以防范 DNS rebinding。
+server 只绑定 loopback（`127.0.0.1`、`localhost`、`::1`）。非 loopback 的 `--host` 会被拒绝，因此未认证的 UI 不会暴露到网络。它是严格只读的——不做任何写入——在 loopback 绑定下数据也不会离开本机。server 还会校验浏览器的 `Host` header，以防范 DNS rebinding。
 
 修改 `--port` 也会改变接受的 `Host`，所以请求必须指向 server 实际绑定的同一个 `host:port`。
