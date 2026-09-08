@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn ensure_fresh_never_hard_fails_on_empty_environments() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // With no real agent homes and no workspaces, sync succeeds with
@@ -550,34 +550,32 @@ mod tests {
     #[test]
     fn a_failed_source_holds_the_freshness_stamp() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous_data_dir = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // A codex session that lists fine (valid session_meta line) but
         // fails to parse during sync (a broken second line) puts a failure
         // in the codex source's sync report.
-        let codex_home = tempfile::tempdir().unwrap();
+        let codex_home = tempfile::tempdir().expect("create temporary CODEX_HOME");
         let sessions = codex_home.path().join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(&sessions).expect("create CODEX_HOME sessions directory");
         std::fs::write(
             sessions.join("rollout-broken.jsonl"),
             concat!(
                 r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc"}}"#,
-                "
-",
-                "{broken json
-",
+                "\n",
+                "{broken json\n",
             ),
         )
-        .unwrap();
+        .expect("write broken Codex session fixture");
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         std::env::set_var("CODEX_HOME", codex_home.path());
 
-        let report = sync_all_with_conn(&schema::open().unwrap(), false)
+        let report = sync_all_with_conn(&schema::open().expect("open the test archive"), false)
             .expect("sync never hard-fails on a broken source");
 
-        let conn = schema::open().unwrap();
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        let conn = schema::open().expect("reopen the test archive");
+        let last = store::meta_get(&conn, "last_sync_at").expect("read last_sync_at");
         let codex_failed = report.sources.iter().any(|source| {
             source.source == "codex" && (source.error.is_some() || !source.failures.is_empty())
         });
@@ -597,79 +595,15 @@ mod tests {
     #[test]
     fn sync_stamps_an_empty_source_set() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
-        let conn = schema::open().unwrap();
-        let report = sync_sources(&conn, false, &[], false).unwrap();
+        let conn = schema::open().expect("open the test archive");
+        let report = sync_sources(&conn, false, &[], false).expect("sync an empty source set");
         assert!(report.sources.is_empty());
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        let last = store::meta_get(&conn, "last_sync_at").expect("read last_sync_at");
         assert!(last.is_some(), "sync stamps last_sync_at");
         match previous {
-            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
-            None => std::env::remove_var("SIVTR_DATA_DIR"),
-        }
-    }
-
-    #[test]
-    fn ensure_fresh_never_hard_fails_on_empty_environments() {
-        let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("SIVTR_DATA_DIR");
-        std::env::set_var("SIVTR_DATA_DIR", dir.path());
-        // With no real agent homes and no workspaces, sync succeeds with
-        // empty listings or per-provider errors — never a hard failure.
-        // Providers whose homes are missing error their listing, so every
-        // skip entry carries a reason; the stamp stays held by the dirty
-        // pass (a_failed_source_holds_the_freshness_stamp covers that).
-        let skipped = ensure_fresh().expect("sync tolerates empty environments");
-        assert!(skipped.iter().all(|entry| !entry.error.is_empty()));
-        match previous {
-            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
-            None => std::env::remove_var("SIVTR_DATA_DIR"),
-        }
-    }
-
-    #[test]
-    fn a_failed_source_holds_the_freshness_stamp() {
-        let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let previous_data_dir = std::env::var_os("SIVTR_DATA_DIR");
-        std::env::set_var("SIVTR_DATA_DIR", dir.path());
-        // A codex session that lists fine (valid session_meta line) but
-        // fails to parse during sync (a broken second line) puts a failure
-        // in the codex source's sync report.
-        let codex_home = tempfile::tempdir().unwrap();
-        let sessions = codex_home.path().join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
-        std::fs::write(
-            sessions.join("rollout-broken.jsonl"),
-            concat!(
-                r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc"}}"#,
-                "\n",
-                "{broken json\n",
-            ),
-        )
-        .unwrap();
-        let previous_codex_home = std::env::var_os("CODEX_HOME");
-        std::env::set_var("CODEX_HOME", codex_home.path());
-
-        let report = sync_all_with_conn(&schema::open().unwrap(), false)
-            .expect("sync never hard-fails on a broken source");
-
-        let conn = schema::open().unwrap();
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
-        let codex_failed = report.sources.iter().any(|source| {
-            source.source == "codex" && (source.error.is_some() || !source.failures.is_empty())
-        });
-        assert!(codex_failed, "the broken codex file fails its sync");
-        assert!(last.is_none(), "a failed source holds last_sync_at");
-
-        match previous_codex_home {
-            Some(value) => std::env::set_var("CODEX_HOME", value),
-            None => std::env::remove_var("CODEX_HOME"),
-        }
-        match previous_data_dir {
             Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
             None => std::env::remove_var("SIVTR_DATA_DIR"),
         }
@@ -681,7 +615,7 @@ mod tests {
     fn ensure_fresh_fails_open_while_a_pass_is_running() {
         let _guard = crate::test_env_lock();
         let held = FRESH_GATE.try_lock().expect("gate free in test");
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         let conn = schema::open().expect("open the test archive");
@@ -702,7 +636,7 @@ mod tests {
             schema_version: crate::record::RECORD_SCHEMA_VERSION,
             work_ref: "codex/canonical-id/1"
                 .parse()
-                .expect("parse codex work ref"),
+                .expect("parse canonical work ref"),
             session: WorkSessionRef {
                 id: "canonical-id".into(),
                 canonical_id: Some("canonical-id".into()),
@@ -715,7 +649,8 @@ mod tests {
             parts: vec![],
         };
         // Records carry the canonical id even when the listing id differs.
-        let derived = derive_session_id(&[record], Some("listing-id")).unwrap();
+        let derived = derive_session_id(&[record], Some("listing-id"))
+            .expect("derive session id from canonical records");
         assert_eq!(derived, "canonical-id");
     }
 }
