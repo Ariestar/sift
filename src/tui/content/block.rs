@@ -409,8 +409,8 @@ mod tests {
     use crate::tui::content::io::ExpandedBlocks;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        WorkActor, WorkChannel, WorkContent, WorkContentBlock, WorkRecordKind, WorkRef,
-        WorkSessionRef, WorkSource, WorkTime, RECORD_SCHEMA_VERSION,
+        WorkChannel, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
+        RECORD_SCHEMA_VERSION,
     };
 
     fn shell_action(seq: usize, command: &str, output: &str, exit: Option<i32>) -> WorkPart {
@@ -437,29 +437,13 @@ mod tests {
     }
 
     fn tool_action(seq: usize, tool: &str, path: &str, output: Option<&str>) -> WorkPart {
-        WorkPart {
+        crate::test_fixtures::tool_action_part(
             seq,
-            occurred_at: None,
-            body: WorkPartBody::Action {
-                id: format!("a{seq}"),
-                actor: WorkActor::Agent,
-                target: WorkTarget::Tool {
-                    name: Some(tool.to_string()),
-                },
-                title: None,
-                input: Some(WorkContent::Json(serde_json::json!({ "file_path": path }))),
-                output: output
-                    .map(|text| {
-                        vec![WorkContentBlock {
-                            content: WorkContent::Json(serde_json::json!({ "stdout": text })),
-                            start_line: None,
-                        }]
-                    })
-                    .unwrap_or_default(),
-                status: WorkActionStatus::Completed,
-                exit_code: None,
-            },
-        }
+            &format!("a{seq}"),
+            Some(tool),
+            Some(serde_json::json!({ "file_path": path })),
+            output.map(|text| serde_json::json!({ "stdout": text })),
+        )
     }
 
     fn user_message(seq: usize, content: &str) -> WorkPart {

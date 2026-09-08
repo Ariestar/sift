@@ -1311,53 +1311,11 @@ mod tests {
         serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text))
     }
 
-    use crate::test_fixtures::{message_part, shell_action_part};
-    use sivtr_core::record::{
-        MessageRole, WorkActionStatus, WorkActor, WorkContent, WorkContentBlock, WorkPartBody,
-        WorkTarget,
-    };
+    use crate::test_fixtures::{message_part, shell_action_part, tool_action_part};
+    use sivtr_core::record::{MessageRole, WorkContent, WorkPart, WorkPartBody};
 
     fn assistant_part(seq: usize, content: &str) -> WorkPart {
         message_part(seq, MessageRole::Assistant, content)
-    }
-
-    /// One agent tool action carrying input and result — the shape the core
-    /// reducer builds once a call's result event arrives.
-    fn tool_action_part(
-        seq: usize,
-        id: &str,
-        tool: Option<&str>,
-        input: Option<serde_json::Value>,
-        output: Option<serde_json::Value>,
-    ) -> WorkPart {
-        let has_output = output.is_some();
-        WorkPart {
-            seq,
-            occurred_at: None,
-            body: WorkPartBody::Action {
-                id: id.to_string(),
-                actor: WorkActor::Agent,
-                target: WorkTarget::Tool {
-                    name: tool.map(str::to_string),
-                },
-                title: None,
-                input: input.map(WorkContent::Json),
-                output: output
-                    .map(|value| {
-                        vec![WorkContentBlock {
-                            content: WorkContent::Json(value),
-                            start_line: None,
-                        }]
-                    })
-                    .unwrap_or_default(),
-                status: if has_output {
-                    WorkActionStatus::Completed
-                } else {
-                    WorkActionStatus::InProgress
-                },
-                exit_code: None,
-            },
-        }
     }
 
     use super::super::content::{
@@ -1384,7 +1342,7 @@ mod tests {
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{WorkAt, WorkRef};
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        WorkChannel, WorkRecord, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
         RECORD_SCHEMA_VERSION,
     };
     use std::time::SystemTime;
