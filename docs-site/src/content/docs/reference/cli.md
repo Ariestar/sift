@@ -903,7 +903,7 @@ Serves a local web UI and a read-only JSON API over the unified archive: a sessi
 | `--port <PORT>` | TCP port to bind (default `8080`) |
 | `--host <HOST>` | Loopback bind address (default `127.0.0.1`). Non-loopback values are rejected. |
 
-The server only binds loopback and validates the browser `Host` header to guard against DNS rebinding. It is read-only — no writes — and with a loopback bind, data never leaves the machine. See [Web UI](/usage/web-ui/).
+The server only binds loopback and validates the browser `Host` header to guard against DNS rebinding. The HTTP API is read-only; startup may refresh the local archive via `ensure_fresh()`. With a loopback bind, data never leaves the machine. See [Web UI](/usage/web-ui/).
 
 ```bash
 sivtr web

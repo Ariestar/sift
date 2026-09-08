@@ -37,6 +37,6 @@ The same surface is available as a read-only JSON API:
 
 ## Privacy
 
-The server binds loopback only (`127.0.0.1`, `localhost`, `::1`). Non-loopback `--host` values are rejected, so the unauthenticated UI cannot be exposed on the network. It is strictly read-only — no writes — and with a loopback bind, data never leaves the machine. The server also validates the browser `Host` header to guard against DNS rebinding.
+The server binds loopback only (`127.0.0.1`, `localhost`, `::1`). Non-loopback `--host` values are rejected, so the unauthenticated UI cannot be exposed on the network. The HTTP API is read-only; startup may refresh the local archive via `ensure_fresh()`. With a loopback bind, data never leaves the machine. The server also validates the browser `Host` header to guard against DNS rebinding.
 
 Changing `--port` also changes the accepted `Host`, so requests must target the same `host:port` the server is bound to.

@@ -50,13 +50,24 @@ pub fn execute(args: &WebArgs) -> Result<()> {
     runtime.block_on(serve(args.host.clone(), args.port))
 }
 
+fn bind_addr(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
 async fn serve(host: String, port: u16) -> Result<()> {
-    let app = router(port);
-    let addr = format!("{host}:{port}");
+    let addr = bind_addr(&host, port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("Failed to bind web server on {addr}"))?;
-    crate::output::info(format!("sivtr web UI listening on http://{addr}"));
+    let bound = listener
+        .local_addr()
+        .context("Failed to read the bound web server address")?;
+    let app = router(bound.port());
+    crate::output::info(format!("sivtr web UI listening on http://{bound}"));
     axum::serve(listener, app).await.context("web server error")
 }
 
@@ -144,21 +155,20 @@ fn default_limit() -> i64 {
 const MAX_PAGE: i64 = 200;
 const MAX_SEARCH: usize = 200;
 
-fn page_bounds(limit: i64, offset: i64) -> Result<(i64, i64), Response> {
+fn page_bounds(limit: i64, offset: i64) -> Option<(i64, i64)> {
     if limit < 0 || offset < 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "limit and offset must be >= 0" })),
-        )
-            .into_response());
+        return None;
     }
-    Ok((limit.min(MAX_PAGE), offset))
+    Some((limit.min(MAX_PAGE), offset))
 }
 
 async fn sessions(AxQuery(query): AxQuery<SessionsQuery>) -> Response {
-    let (limit, offset) = match page_bounds(query.limit, query.offset) {
-        Ok(bounds) => bounds,
-        Err(response) => return response,
+    let Some((limit, offset)) = page_bounds(query.limit, query.offset) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "limit and offset must be >= 0" })),
+        )
+            .into_response();
     };
     with_archive(|conn| {
         Ok(json!(store::list_sessions_meta(
@@ -308,6 +318,13 @@ mod tests {
     }
 
     #[test]
+    fn bind_addr_brackets_bare_ipv6() {
+        assert_eq!(bind_addr("::1", 8080), "[::1]:8080");
+        assert_eq!(bind_addr("[::1]", 8080), "[::1]:8080");
+        assert_eq!(bind_addr("127.0.0.1", 8080), "127.0.0.1:8080");
+    }
+
+    #[test]
     fn execute_rejects_non_loopback_host() {
         let args = crate::cli::WebArgs {
             port: 8080,
@@ -328,10 +345,10 @@ mod tests {
                     .header(header::HOST, "evil.example.com")
                     .uri("/api/v1/health")
                     .body(axum::body::Body::empty())
-                    .unwrap(),
+                    .expect("build host-guard request"),
             )
             .await
-            .unwrap();
+            .expect("dispatch host-guard request");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
@@ -341,7 +358,7 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     async fn health_serves_json_on_loopback_host() {
         let _guard = env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         let response = test_router()
             .oneshot(
@@ -349,10 +366,10 @@ mod tests {
                     .header(header::HOST, "localhost:8080")
                     .uri("/api/v1/health")
                     .body(axum::body::Body::empty())
-                    .unwrap(),
+                    .expect("build health request"),
             )
             .await
-            .unwrap();
+            .expect("dispatch health request");
         assert_eq!(response.status(), StatusCode::OK);
         std::env::remove_var("SIVTR_DATA_DIR");
     }
@@ -365,10 +382,10 @@ mod tests {
                     .header(header::HOST, "localhost:8080")
                     .uri("/")
                     .body(axum::body::Body::empty())
-                    .unwrap(),
+                    .expect("build index request"),
             )
             .await
-            .unwrap();
+            .expect("dispatch index request");
         assert_eq!(response.status(), StatusCode::OK);
     }
 }

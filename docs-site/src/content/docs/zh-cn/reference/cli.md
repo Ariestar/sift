@@ -901,7 +901,7 @@ sivtr web [--port <PORT>] [--host <HOST>]
 | `--port <PORT>` | 要绑定的 TCP 端口（默认 `8080`） |
 | `--host <HOST>` | 仅 loopback 绑定地址（默认 `127.0.0.1`）。非 loopback 值会被拒绝。 |
 
-server 只绑定 loopback，并校验浏览器 `Host` header 以防范 DNS rebinding。它是只读的——不做任何写入——在 loopback 绑定下数据也不会离开本机。详见 [Web UI](/zh-cn/usage/web-ui/)。
+server 只绑定 loopback，并校验浏览器 `Host` header 以防范 DNS rebinding。HTTP API 是只读的；启动时可能通过 `ensure_fresh()` 刷新本地 archive。在 loopback 绑定下数据也不会离开本机。详见 [Web UI](/zh-cn/usage/web-ui/)。
 
 ```bash
 sivtr web

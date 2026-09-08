@@ -37,6 +37,6 @@ sivtr web
 
 ## 隐私
 
-server 只绑定 loopback（`127.0.0.1`、`localhost`、`::1`）。非 loopback 的 `--host` 会被拒绝，因此未认证的 UI 不会暴露到网络。它是严格只读的——不做任何写入——在 loopback 绑定下数据也不会离开本机。server 还会校验浏览器的 `Host` header，以防范 DNS rebinding。
+server 只绑定 loopback（`127.0.0.1`、`localhost`、`::1`）。非 loopback 的 `--host` 会被拒绝，因此未认证的 UI 不会暴露到网络。HTTP API 是只读的；启动时可能通过 `ensure_fresh()` 刷新本地 archive。在 loopback 绑定下数据也不会离开本机。server 还会校验浏览器的 `Host` header，以防范 DNS rebinding。
 
 修改 `--port` 也会改变接受的 `Host`，所以请求必须指向 server 实际绑定的同一个 `host:port`。
