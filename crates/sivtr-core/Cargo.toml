@@ -22,7 +22,7 @@ rusqlite = { version = "0.40", features = ["bundled", "vtab"] }
 flate2 = "1.1"
 rust-embed = "8.12.0"
 arboard = "3"
-dirs = "6"
+dirs = "7"
 uuid = { version = "1", features = ["v4"] }
 hostname = "0.4"
 anyhow = "1"
