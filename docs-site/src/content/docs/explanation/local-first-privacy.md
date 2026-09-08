@@ -18,7 +18,7 @@ It does not provide a hosted transcript service by default.
 
 ## The local archive
 
-Terminal captures and agent sessions live in one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process: native session files remain the source of truth: the sync engine reads them, and session-addressed loads self-heal by parsing the native file when the archive copy is missing or stale.
+Terminal captures and agent sessions live in one local SQLite archive (`archive.db`) under sivtr's data directory. Nothing leaves the machine in the process. Native session files remain the source of truth: the sync engine reads them locally, and session-addressed loads self-heal by parsing the native file when the archive copy is missing or stale.
 ## Explicit remote share
 
 Cross-device memory access is also opt-in. Nothing leaves the machine until you create a share (`sivtr share` / `share add`), issue an invite (`share invite`), and a peer redeems it:

@@ -230,7 +230,7 @@ fn apply_user(session: &mut AgentSession, value: &Value) {
     }
 
     let text = extract_user_text(value.get("content").unwrap_or(&Value::Null));
-    if text.trim().is_empty() || is_scaffolding_user_text(&text) {
+    if text.trim().is_empty() {
         return;
     }
     push_block(session, AgentBlockKind::User, None, None, text);
@@ -706,14 +706,6 @@ fn extract_user_query(text: &str) -> Option<String> {
     } else {
         Some(query.to_string())
     }
-}
-
-fn is_scaffolding_user_text(text: &str) -> bool {
-    let trimmed = text.trim_start();
-    trimmed.starts_with("<user_info>")
-        || trimmed.starts_with("<system-reminder>")
-        || trimmed.starts_with("<image_files>")
-        || trimmed.starts_with("<environment_context>")
 }
 
 fn parse_rfc3339(value: Option<&str>) -> Option<SystemTime> {
