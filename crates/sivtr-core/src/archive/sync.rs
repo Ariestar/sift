@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, TryLockError};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -169,16 +170,21 @@ fn sync_sources(
         sources,
         duration_ms: started.elapsed().as_millis() as u64,
     };
-    if report
+    // The freshness stamp advances only on a clean pass: a source that
+    // failed listing or parsing leaves it stale, so the next query re-syncs
+    // and re-reports the failure instead of reading a stale archive for a
+    // full `max_age_secs` window.
+    let clean = report
         .sources
         .iter()
-        .all(|source| source.error.is_none() && source.failures.is_empty())
-    {
+        .all(|source| source.error.is_none() && source.failures.is_empty());
+    if clean {
         store::meta_set(
             conn,
             "last_sync_at",
             &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-        )?;
+        )
+        .context("Failed to stamp archive sync completion")?;
     }
     Ok(report)
 }
@@ -455,7 +461,27 @@ pub fn ensure_fresh() -> Result<Vec<SkippedSession>> {
 }
 
 /// [`ensure_fresh`] on a caller-owned connection.
+///
+/// One freshness pass at a time per process: concurrent readers (the browse
+/// TUI spawns one loader per source) single-flight on [`FRESH_GATE`]. The
+/// first caller runs the pass; everyone else fails open and reads the
+/// archive as-is (stale-while-revalidate: WAL readers never block, and any
+/// later query re-checks the stamp). Without the gate, N concurrent readers
+/// each run a full sweep and race each other's SQLite writes.
+static FRESH_GATE: Mutex<()> = Mutex::new(());
+
 pub fn ensure_fresh_with_conn(conn: &Connection) -> Result<Vec<SkippedSession>> {
+    let _gate = match FRESH_GATE.try_lock() {
+        Ok(gate) => gate,
+        // Another pass is already running in this process: read the current
+        // archive instead of queuing behind it.
+        Err(TryLockError::WouldBlock) => return Ok(Vec::new()),
+        // A panicked pass leaves the gate poisoned; keep syncing.
+        Err(TryLockError::Poisoned(poison)) => poison.into_inner(),
+    };
+
+    // Re-check the TTL under the gate: a concurrent process may have just
+    // completed a pass, making ours redundant.
     let max_age_secs = sync_max_age_secs()?;
     if max_age_secs > 0 {
         if let Some(last) = store::meta_get(conn, "last_sync_at")? {
@@ -505,7 +531,7 @@ mod tests {
     #[test]
     fn ensure_fresh_never_hard_fails_on_empty_environments() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // With no real agent homes and no workspaces, sync succeeds with
@@ -524,34 +550,32 @@ mod tests {
     #[test]
     fn a_failed_source_holds_the_freshness_stamp() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
         let previous_data_dir = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
         // A codex session that lists fine (valid session_meta line) but
         // fails to parse during sync (a broken second line) puts a failure
         // in the codex source's sync report.
-        let codex_home = tempfile::tempdir().unwrap();
+        let codex_home = tempfile::tempdir().expect("create temporary CODEX_HOME");
         let sessions = codex_home.path().join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(&sessions).expect("create CODEX_HOME sessions directory");
         std::fs::write(
             sessions.join("rollout-broken.jsonl"),
             concat!(
                 r#"{"timestamp":"2026-04-27T00:00:00Z","type":"session_meta","payload":{"id":"abc"}}"#,
-                "
-",
-                "{broken json
-",
+                "\n",
+                "{broken json\n",
             ),
         )
-        .unwrap();
+        .expect("write broken Codex session fixture");
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         std::env::set_var("CODEX_HOME", codex_home.path());
 
-        let report = sync_all_with_conn(&schema::open().unwrap(), false)
+        let report = sync_all_with_conn(&schema::open().expect("open the test archive"), false)
             .expect("sync never hard-fails on a broken source");
 
-        let conn = schema::open().unwrap();
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        let conn = schema::open().expect("reopen the test archive");
+        let last = store::meta_get(&conn, "last_sync_at").expect("read last_sync_at");
         let codex_failed = report.sources.iter().any(|source| {
             source.source == "codex" && (source.error.is_some() || !source.failures.is_empty())
         });
@@ -571,14 +595,37 @@ mod tests {
     #[test]
     fn sync_stamps_an_empty_source_set() {
         let _guard = crate::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temporary data directory");
+        let previous = std::env::var_os("SIVTR_DATA_DIR");
         std::env::set_var("SIVTR_DATA_DIR", dir.path());
-        let conn = schema::open().unwrap();
-        let report = sync_sources(&conn, false, &[], false).unwrap();
+        let conn = schema::open().expect("open the test archive");
+        let report = sync_sources(&conn, false, &[], false).expect("sync an empty source set");
         assert!(report.sources.is_empty());
-        let last = store::meta_get(&conn, "last_sync_at").unwrap();
+        let last = store::meta_get(&conn, "last_sync_at").expect("read last_sync_at");
         assert!(last.is_some(), "sync stamps last_sync_at");
-        std::env::remove_var("SIVTR_DATA_DIR");
+        match previous {
+            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
+            None => std::env::remove_var("SIVTR_DATA_DIR"),
+        }
+    }
+
+    /// The gate must fail open: while a pass holds it, concurrent readers get
+    /// an empty skip list and read the archive as-is instead of queuing.
+    #[test]
+    fn ensure_fresh_fails_open_while_a_pass_is_running() {
+        let _guard = crate::test_env_lock();
+        let held = FRESH_GATE.try_lock().expect("gate free in test");
+        let dir = tempfile::tempdir().expect("create temporary data directory");
+        let previous = std::env::var_os("SIVTR_DATA_DIR");
+        std::env::set_var("SIVTR_DATA_DIR", dir.path());
+        let conn = schema::open().expect("open the test archive");
+        let skipped = ensure_fresh_with_conn(&conn).expect("fail-open read succeeds");
+        assert!(skipped.is_empty(), "blocked reader reads as-is");
+        drop(held);
+        match previous {
+            Some(value) => std::env::set_var("SIVTR_DATA_DIR", value),
+            None => std::env::remove_var("SIVTR_DATA_DIR"),
+        }
     }
 
     #[test]
@@ -589,7 +636,7 @@ mod tests {
             schema_version: crate::record::RECORD_SCHEMA_VERSION,
             work_ref: "codex/canonical-id/1"
                 .parse()
-                .expect("parse codex work ref"),
+                .expect("parse canonical work ref"),
             session: WorkSessionRef {
                 id: "canonical-id".into(),
                 canonical_id: Some("canonical-id".into()),
@@ -602,7 +649,8 @@ mod tests {
             parts: vec![],
         };
         // Records carry the canonical id even when the listing id differs.
-        let derived = derive_session_id(&[record], Some("listing-id")).unwrap();
+        let derived = derive_session_id(&[record], Some("listing-id"))
+            .expect("derive session id from canonical records");
         assert_eq!(derived, "canonical-id");
     }
 }
