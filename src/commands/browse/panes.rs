@@ -147,7 +147,7 @@ fn shell_from_row(
 /// Domain context for dialogue ensure (one frame).
 ///
 /// `sessions` is the **meta** list (titles/ids/body_loaded). Turn bodies are
-/// read through `records` (product: `SessionColumn::body_for`).
+/// read through `records` (the browse loader or a search corpus).
 #[derive(Clone, Copy)]
 pub struct DialogueCtx<'a> {
     pub sessions: &'a [WorkspaceSession],

@@ -7,7 +7,6 @@
 pub mod content;
 pub mod pane;
 pub mod panic;
-pub mod search;
 pub mod terminal;
 pub mod theme;
 pub mod workspace;

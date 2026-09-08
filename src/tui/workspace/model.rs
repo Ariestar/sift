@@ -2,6 +2,7 @@
 
 use ratatui::prelude::Color;
 use ratatui::widgets::ListState;
+use regex::Regex;
 use sivtr_core::ai::AgentProvider;
 use sivtr_core::record::{WorkAt, WorkRecord, WorkRef, WorkScope};
 use std::collections::HashSet;
@@ -13,7 +14,6 @@ use crate::tui::content::io::{
 };
 use crate::tui::content::text::content_io_from_record;
 use crate::tui::content::view::{ContentSelection, ContentViewMode};
-use crate::tui::search::WorkspaceSearchScope;
 use crate::tui::theme;
 use crate::tui::workspace::rows::Rows;
 use sivtr_core::workset::{WorkSelectionKind, WorkSelectionTarget};
@@ -375,11 +375,12 @@ pub(crate) struct WorkspaceView<'a> {
 
 pub(crate) struct WorkspaceSearchView<'a> {
     pub(crate) query: &'a str,
-    pub(crate) scope: WorkspaceSearchScope,
     pub(crate) result_count: usize,
     pub(crate) current_match: Option<usize>,
     pub(crate) match_count: usize,
     pub(crate) current_target: Option<String>,
+    pub(crate) regex: Option<&'a Regex>,
+    pub(crate) error: Option<&'a str>,
     pub(crate) input_open: bool,
 }
 

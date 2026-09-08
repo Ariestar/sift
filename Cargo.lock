@@ -4945,7 +4945,6 @@ dependencies = [
  "chrono",
  "dirs",
  "hostname",
- "libc",
  "regex",
  "rmp-serde",
  "rusqlite",

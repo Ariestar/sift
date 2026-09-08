@@ -10,10 +10,6 @@ use crate::tui::content::view::{
     content_block_at, content_block_range, content_dot_at, content_link_at, content_position_at,
     content_row_in_text, ContentViewMode,
 };
-use crate::tui::search::{
-    workspace_search_fingerprint, workspace_search_has_query, workspace_search_query,
-    WorkspaceSearchIndex, WorkspaceSearchOutput,
-};
 use crate::tui::terminal::read_interaction;
 use crate::tui::workspace::{
     active_rows, help_action_for_key, panel_inner_rows, render_workspace, search_match_half,
@@ -24,8 +20,8 @@ use crate::tui::workspace::{
 };
 
 use super::content::{
-    active_workspace_content_at, handle_line_filter_key, handle_line_filter_paste,
-    line_filter_spec, workspace_picked_content_for_selected_parts, workspace_search_target_ref,
+    handle_line_filter_key, handle_line_filter_paste, line_filter_spec,
+    workspace_picked_content_for_selected_parts,
 };
 use super::help::{apply_workspace_help_action, set_focus, toggle_list_row, HelpDispatch};
 use super::load::{SessionColumn, SessionCtx, SourceLoadState};
@@ -35,6 +31,7 @@ use super::nav::{
 };
 use super::panes::{ContentCtx, ContentPane, DialogueCtx, DialoguePane};
 use super::publish_overlay::{self, OverlayFocus, OverlayKey, PublishOverlay};
+use super::search::{active_workspace_content_at, workspace_search_target_ref, WorkspaceSearch};
 use super::selection::{refresh_next_level, toggle_block_selection, toggle_row_selection};
 use super::visual::{
     apply_workspace_mouse_scroll, handle_content_mouse_select, handle_visual_select_key,
@@ -46,13 +43,19 @@ use crate::pane::{Pane, PaneInput, Viewport};
 fn session_record_snapshot(
     sessions: &[WorkspaceSession],
     sessions_pane: &SessionColumn,
+    search: &WorkspaceSearch,
 ) -> Vec<Vec<sivtr_core::record::WorkRecord>> {
     sessions
         .iter()
         .map(|session| {
-            sessions_pane
-                .body_for(session)
-                .map_or_else(Vec::new, ToOwned::to_owned)
+            search.records_for(session).map_or_else(
+                || {
+                    sessions_pane
+                        .body_for(session)
+                        .map_or_else(Vec::new, ToOwned::to_owned)
+                },
+                ToOwned::to_owned,
+            )
         })
         .collect()
 }
@@ -117,13 +120,7 @@ pub(crate) fn run(
     let mut show_help = false;
     let mut publish_overlay: Option<PublishOverlay> = None;
     let mut publish_error: Option<String> = None;
-    let mut show_search = false;
-    let mut search_query = String::new();
-    let mut search_output = WorkspaceSearchOutput::default();
-    let mut search_engine: Option<(WorkspaceSearchIndex, Vec<WorkspaceSession>)> = None;
-    let mut search_cursor = 0usize;
-    let mut search_dirty = true;
-    let mut search_apply_pending = false;
+    let mut search = WorkspaceSearch::new();
     let mut line_filter_input_open = false;
     let mut line_filter = String::new();
     let mut line_filter_error: Option<String> = None;
@@ -147,7 +144,6 @@ pub(crate) fn run(
         let mut reproject = false;
         if sessions_pane.poll() {
             sessions_dirty = true;
-            search_dirty = true;
             redraw = true;
         }
         if sessions_dirty {
@@ -155,51 +151,13 @@ pub(crate) fn run(
             sessions_dirty = false;
             reproject = true;
         }
-        if search_dirty {
-            if workspace_search_has_query(&search_query) {
-                // Rebuild the search corpus and index only when the loaded
-                // corpus changed; both are cached across keystrokes so typing
-                // does not clone every hydrated session per keypress.
-                let fingerprint = workspace_search_fingerprint(
-                    &all_sessions,
-                    all_sessions
-                        .iter()
-                        .map(|session| sessions_pane.body_for(session).unwrap_or(&[])),
-                );
-                if let Some((index, corpus)) = search_engine
-                    .as_ref()
-                    .filter(|(index, _)| index.fingerprint() == fingerprint)
-                {
-                    search_output = index.search(corpus, &search_query);
-                } else {
-                    let corpus: Vec<_> = all_sessions
-                        .iter()
-                        .map(|s| {
-                            let mut full = s.clone();
-                            if let Some(recs) = sessions_pane.body_for(s) {
-                                full.records.clear();
-                                full.records.extend(recs.iter().cloned());
-                            }
-                            full
-                        })
-                        .collect();
-                    let index = WorkspaceSearchIndex::new(&corpus);
-                    search_output = index.search(&corpus, &search_query);
-                    search_engine = Some((index, corpus));
-                }
-            } else {
-                search_output = WorkspaceSearchOutput::default();
-            }
-            if search_cursor >= search_output.matches.len() {
-                search_cursor = 0;
-            }
-            search_apply_pending = true;
-            search_dirty = false;
+        if search.poll(&cwd) {
+            redraw = true;
             reproject = true;
         }
-        let search_has_query = workspace_search_has_query(&search_query);
+        let search_has_query = search.query_active();
         if search_has_query {
-            sessions = search_output.sessions.clone();
+            sessions = search.output().sessions.clone();
         } else if reproject {
             sessions = all_sessions.clone();
         }
@@ -207,15 +165,12 @@ pub(crate) fn run(
         // `fit` keeps the mask and cursor inside it (and drops a `v` range
         // anchored into a list that no longer means the same thing).
         rows.sessions.fit(sessions.len());
-        let pending_match = if search_has_query && search_apply_pending {
-            search_output.matches.get(search_cursor).cloned()
-        } else {
-            None
-        };
+        let pending_match = search.pending_match();
         if let Some(matched) = &pending_match {
             // A search jump starts the session list over on the hit row.
             rows.sessions.reset(sessions.len());
             rows.sessions.select(matched.session_index);
+            search.finish_pending();
         }
         let session_idx = rows.sessions.cursor();
 
@@ -244,8 +199,14 @@ pub(crate) fn run(
             .as_ref()
             .map(|matched| matched.dialogue_index)
             .unwrap_or_else(|| rows.dialogues.cursor());
-        // Body always from SessionColumn — list is meta-only in both browse and search.
-        let records = |s: &crate::tui::workspace::WorkspaceSession| sessions_pane.body_for(s);
+        let session_scope = rows.sessions.scope_mask().to_vec();
+        let records = |s: &crate::tui::workspace::WorkspaceSession| {
+            if search_has_query {
+                search.records_for(s)
+            } else {
+                sessions_pane.body_for(s)
+            }
+        };
         let dialogue_viewport =
             Viewport::from_panel(rows.dialogues.offset(), panel_inner_rows(layout.dialogues));
         rows.dialogues.fit(dialogue_pane.len());
@@ -253,7 +214,7 @@ pub(crate) fn run(
             DialogueCtx {
                 sessions: &sessions,
                 session_idx,
-                session_scope: rows.sessions.scope_mask(),
+                session_scope: &session_scope,
                 records: &records,
             },
             &PaneInput::new(dialogue_viewport, dialogue_focus_hint)
@@ -268,7 +229,7 @@ pub(crate) fn run(
                 DialogueCtx {
                     sessions: &sessions,
                     session_idx,
-                    session_scope: rows.sessions.scope_mask(),
+                    session_scope: &session_scope,
                     records: &records,
                 },
                 &PaneInput::new(
@@ -288,7 +249,7 @@ pub(crate) fn run(
             DialogueCtx {
                 sessions: &sessions,
                 session_idx,
-                session_scope: rows.sessions.scope_mask(),
+                session_scope: &session_scope,
                 records: &records,
             },
             &PaneInput::new(dialogue_viewport, dialogue_idx)
@@ -298,14 +259,8 @@ pub(crate) fn run(
         if pending_match.is_some() {
             rows.close_ranges();
         }
-        let active_content_at = active_workspace_content_at(
-            search_has_query,
-            &search_output,
-            search_cursor,
-            session_idx,
-            &dialogue_selection,
-            dialogue_idx,
-        );
+        let active_content_at =
+            active_workspace_content_at(&search, session_idx, &dialogue_selection, dialogue_idx);
 
         // Materialize the dialogue projection only when the engine, the
         // dialogue selection, or the focused row changed. Content scrolling and
@@ -415,7 +370,6 @@ pub(crate) fn run(
             if let Some((half, scroll)) = pending_half {
                 let total = content_frame.line_count(half);
                 content_scrolls.set(half, scroll.min(total.saturating_sub(1)));
-                search_apply_pending = false;
             }
 
             let source_markers = sessions_pane.markers();
@@ -449,24 +403,29 @@ pub(crate) fn run(
                         content_at: active_content_at,
                         show_help,
                         help_state: &help_state,
-                        search: (show_search || search_has_query).then_some(WorkspaceSearchView {
-                            query: &search_query,
-                            scope: workspace_search_query(&search_query).0,
-                            result_count: sessions.len(),
-                            current_match: (!search_output.matches.is_empty())
-                                .then_some(search_cursor),
-                            match_count: search_output.matches.len(),
-                            current_target: search_output
-                                .matches
-                                .get(search_cursor)
-                                .and_then(|matched| {
-                                    workspace_search_target_ref(&sessions, matched, &|s| {
-                                        sessions_pane.body_for(s)
+                        search: (search.input_open() || search_has_query).then_some(
+                            WorkspaceSearchView {
+                                query: search.query(),
+                                result_count: sessions.len(),
+                                current_match: (!search.output().matches.is_empty())
+                                    .then_some(search.cursor()),
+                                match_count: search.output().matches.len(),
+                                current_target: search
+                                    .output()
+                                    .matches
+                                    .get(search.cursor())
+                                    .and_then(|matched| {
+                                        workspace_search_target_ref(&search, &sessions, matched)
                                     })
-                                })
-                                .map(|work_ref| work_ref.to_string()),
-                            input_open: show_search,
-                        }),
+                                    .map(|work_ref| work_ref.to_string()),
+                                regex: search.regex(),
+                                error: search
+                                    .is_fetching()
+                                    .then_some("loading workspace")
+                                    .or_else(|| search.error()),
+                                input_open: search.input_open(),
+                            },
+                        ),
                         line_filter_input_open,
                         line_filter: (!line_filter.is_empty()).then_some(line_filter.as_str()),
                         line_filter_error: line_filter_error.as_deref(),
@@ -498,7 +457,7 @@ pub(crate) fn run(
             // Ratatui reveals the cursor after every frame. Keep it visible
             // only while typing in an overlay or while selecting text — a
             // plain click (no drag) never shows it.
-            if show_search
+            if search.input_open()
                 || line_filter_input_open
                 || publish_overlay
                     .as_ref()
@@ -518,13 +477,13 @@ pub(crate) fn run(
         // the palette while the TUI stays up. When nothing is loading and the
         // theme is fixed, block until an event arrives instead of redrawing
         // the whole frame at a fixed rate.
-        let poll_timeout = if sessions_pane.is_fetching() {
+        let poll_timeout = if sessions_pane.is_fetching() || search.is_fetching() {
             std::time::Duration::from_millis(100)
         } else {
             crate::tui::theme::auto_interval().unwrap_or(std::time::Duration::from_secs(3600))
         };
         if !event::poll(poll_timeout)? {
-            if sessions_pane.is_fetching() {
+            if sessions_pane.is_fetching() || search.is_fetching() {
                 loading_tick = loading_tick.wrapping_add(1);
                 redraw = true;
             } else if crate::tui::theme::refresh_if_changed() {
@@ -539,22 +498,15 @@ pub(crate) fn run(
             Event::Paste(text) => {
                 // Bracketed paste delivers the whole clipboard as one event;
                 // route it to the open text input (search or line filter).
-                if show_search {
+                if search.input_open() {
                     // Search terms match single lines: fold every line break
                     // into a space so a trailing newline (common when copying
                     // a line) or a multi-line clipboard searches as one query
                     // instead of silently matching nothing.
                     let pasted = normalize_search_paste(&text);
                     let pasted = pasted.trim_end();
-                    search_query_edited(
-                        |query| query.push_str(pasted),
-                        &mut search_query,
-                        &mut search_dirty,
-                        &mut search_cursor,
-                        &mut search_apply_pending,
-                        &mut rows,
-                        &mut content_scrolls,
-                    );
+                    search.edit(|query| query.push_str(pasted));
+                    invalidate_panes_below(WorkspaceFocus::Source, &mut rows, &mut content_scrolls);
                 } else if line_filter_input_open {
                     handle_line_filter_paste(&text, &mut line_filter, &mut line_filter_error);
                 } else if publish_overlay
@@ -578,7 +530,7 @@ pub(crate) fn run(
                     && !is_repeat_safe(
                         key.code,
                         key.modifiers,
-                        show_search
+                        search.input_open()
                             || line_filter_input_open
                             || publish_overlay
                                 .as_ref()
@@ -664,14 +616,10 @@ pub(crate) fn run(
                     continue;
                 }
 
-                if show_search {
+                if search.input_open() {
                     match key.code {
                         KeyCode::Esc => {
-                            show_search = false;
-                            search_query.clear();
-                            search_dirty = true;
-                            search_apply_pending = false;
-                            search_cursor = 0;
+                            search.clear();
                             invalidate_panes_below(
                                 WorkspaceFocus::Source,
                                 &mut rows,
@@ -679,7 +627,7 @@ pub(crate) fn run(
                             );
                         }
                         KeyCode::Enter => {
-                            show_search = false;
+                            search.accept();
                         }
                         KeyCode::Up | KeyCode::Down => {
                             move_workspace_cursor(
@@ -691,37 +639,32 @@ pub(crate) fn run(
                                 content_frame.texts.block_slices(),
                             );
                         }
-                        KeyCode::Backspace => search_query_edited(
-                            |query| {
+                        KeyCode::Backspace => {
+                            search.edit(|query| {
                                 query.pop();
-                            },
-                            &mut search_query,
-                            &mut search_dirty,
-                            &mut search_cursor,
-                            &mut search_apply_pending,
-                            &mut rows,
-                            &mut content_scrolls,
-                        ),
-                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            search_query_edited(
-                                |query| query.clear(),
-                                &mut search_query,
-                                &mut search_dirty,
-                                &mut search_cursor,
-                                &mut search_apply_pending,
+                            });
+                            invalidate_panes_below(
+                                WorkspaceFocus::Source,
                                 &mut rows,
                                 &mut content_scrolls,
                             );
                         }
-                        KeyCode::Char(ch) => search_query_edited(
-                            |query| query.push(ch),
-                            &mut search_query,
-                            &mut search_dirty,
-                            &mut search_cursor,
-                            &mut search_apply_pending,
-                            &mut rows,
-                            &mut content_scrolls,
-                        ),
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            search.edit(String::clear);
+                            invalidate_panes_below(
+                                WorkspaceFocus::Source,
+                                &mut rows,
+                                &mut content_scrolls,
+                            );
+                        }
+                        KeyCode::Char(ch) => {
+                            search.edit(|query| query.push(ch));
+                            invalidate_panes_below(
+                                WorkspaceFocus::Source,
+                                &mut rows,
+                                &mut content_scrolls,
+                            );
+                        }
                         _ => {}
                     }
                     continue;
@@ -766,27 +709,20 @@ pub(crate) fn run(
                     }
 
                     // Search-result navigation (not in help table — needs match list state).
-                    if search_has_query && !search_output.matches.is_empty() {
+                    if search_has_query {
                         match key.code {
-                            KeyCode::Char('n') => {
-                                search_cursor = (search_cursor + 1) % search_output.matches.len();
+                            KeyCode::Char('n') if !search.output().matches.is_empty() => {
+                                search.next();
                                 content_scrolls.clear();
-                                search_apply_pending = true;
                                 continue;
                             }
-                            KeyCode::Char('N') => {
-                                search_cursor = search_cursor.checked_sub(1).unwrap_or_else(|| {
-                                    search_output.matches.len().saturating_sub(1)
-                                });
+                            KeyCode::Char('N') if !search.output().matches.is_empty() => {
+                                search.previous();
                                 content_scrolls.clear();
-                                search_apply_pending = true;
                                 continue;
                             }
                             KeyCode::Esc => {
-                                search_query.clear();
-                                search_dirty = true;
-                                search_cursor = 0;
-                                search_apply_pending = false;
+                                search.clear();
                                 invalidate_panes_below(
                                     WorkspaceFocus::Source,
                                     &mut rows,
@@ -817,7 +753,7 @@ pub(crate) fn run(
                             | WorkspaceHelpAction::ToggleAll
                             | WorkspaceHelpAction::RangeSelect
                     ) {
-                        session_record_snapshot(&sessions, &sessions_pane)
+                        session_record_snapshot(&sessions, &sessions_pane, &search)
                     } else {
                         Vec::new()
                     };
@@ -857,9 +793,6 @@ pub(crate) fn run(
                         &mut content_pane,
                         content_frame.texts.block_slices(),
                         &mut show_help,
-                        &mut show_search,
-                        &mut search_query,
-                        &mut search_dirty,
                         active_content_at,
                         line_filter_spec(&line_filter),
                         &sessions,
@@ -869,9 +802,12 @@ pub(crate) fn run(
                         terminal,
                     )? {
                         HelpDispatch::Continue => {}
+                        HelpDispatch::OpenSearch => {
+                            search.open(&sources, rows.source.scope_mask(), &cwd);
+                        }
                         HelpDispatch::Picked(picked) => return Ok(PickerResult::Picked(picked)),
                         HelpDispatch::Publish => {
-                            show_search = false;
+                            search.accept();
                             match crate::commands::publish::prepare_picker(
                                 &rows.selection,
                                 options.publish_title.as_deref(),
@@ -905,10 +841,12 @@ pub(crate) fn run(
                                 &sessions,
                                 &mut sessions_pane,
                                 &mut all_sessions,
-                                &mut search_dirty,
                                 viewport,
                             );
                             sessions_dirty = true;
+                            if search.query_active() {
+                                search.restart(&sources, rows.source.scope_mask(), &cwd);
+                            }
                         }
                     }
                     continue;
@@ -926,7 +864,7 @@ pub(crate) fn run(
                 }
             }
             Event::Mouse(_) if publish_overlay.is_some() => {}
-            Event::Mouse(mouse) if show_help && !show_search => match mouse.kind {
+            Event::Mouse(mouse) if show_help && !search.input_open() => match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     for _ in 0..MOUSE_SCROLL_LINES {
                         help_state.select(Some(selected_index(&help_state).saturating_sub(1)));
@@ -941,7 +879,7 @@ pub(crate) fn run(
                 }
                 _ => {}
             },
-            Event::Mouse(mouse) if !show_help && !show_search => {
+            Event::Mouse(mouse) if !show_help && !search.input_open() => {
                 let size = terminal.size()?;
                 let layout = workspace_layout(
                     ratatui::layout::Rect::new(0, 0, size.width, size.height),
@@ -1145,8 +1083,11 @@ pub(crate) fn run(
                                         // Dot-gutter click toggles the row's
                                         // mark, exactly like Space.
                                         if vertical && dot_gutter_hit(layout.source, mouse.column) {
-                                            let session_records =
-                                                session_record_snapshot(&sessions, &sessions_pane);
+                                            let session_records = session_record_snapshot(
+                                                &sessions,
+                                                &sessions_pane,
+                                                &search,
+                                            );
                                             toggle_row_selection(
                                                 WorkspaceFocus::Source,
                                                 idx,
@@ -1163,7 +1104,6 @@ pub(crate) fn run(
                                                 &mut content_scrolls,
                                             ) {
                                                 sessions_dirty = true;
-                                                search_dirty = true;
                                             }
                                         }
                                     }
@@ -1182,8 +1122,11 @@ pub(crate) fn run(
                                             &mut content_scrolls,
                                         );
                                         if dot_gutter_hit(layout.sessions, mouse.column) {
-                                            let session_records =
-                                                session_record_snapshot(&sessions, &sessions_pane);
+                                            let session_records = session_record_snapshot(
+                                                &sessions,
+                                                &sessions_pane,
+                                                &search,
+                                            );
                                             toggle_row_selection(
                                                 WorkspaceFocus::Sessions,
                                                 idx,
@@ -1249,26 +1192,6 @@ fn normalize_search_paste(text: &str) -> String {
     text.replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
-/// A search input edit (typed character, backspace, or paste) changed the
-/// query: mark the corpus dirty, restart at the first match, and drop the
-/// previous result's selection so a shrinking match set cannot leave
-/// dangling highlights.
-fn search_query_edited(
-    edit: impl FnOnce(&mut String),
-    search_query: &mut String,
-    search_dirty: &mut bool,
-    search_cursor: &mut usize,
-    search_apply_pending: &mut bool,
-    rows: &mut Rows,
-    content_scrolls: &mut ContentScrolls,
-) {
-    edit(search_query);
-    *search_dirty = true;
-    *search_cursor = 0;
-    *search_apply_pending = true;
-    invalidate_panes_below(WorkspaceFocus::Source, rows, content_scrolls);
-}
-
 /// Keys that safely auto-repeat when held. Navigation and scrolling repeat
 /// naturally; toggles and one-shot actions (Enter, Esc, v, r, Tab, Space,
 /// focus digits, …) stay press-only so a held key cannot double-fire.
@@ -1315,7 +1238,7 @@ mod tests {
         handle_line_filter_key, handle_line_filter_paste, workspace_block_parts,
         workspace_dialogue_vim_view, workspace_picked_content_for_copy,
         workspace_picked_content_for_cursor_block, workspace_picked_content_for_selected_parts,
-        workspace_search_target_ref, PickedContent, WorkspaceCopyShortcut,
+        PickedContent, WorkspaceCopyShortcut,
     };
     use super::super::nav::move_workspace_cursor;
     use super::super::panes::{ContentCtx, ContentPane, DialogueCtx, DialoguePane};
@@ -1323,10 +1246,6 @@ mod tests {
     use crate::pane::{Pane, PaneInput, Viewport};
     use crate::tui::content::text::workspace_content_text;
     use crate::tui::content::view::ContentViewMode;
-    use crate::tui::search::{
-        workspace_search_fingerprint, workspace_search_query, workspace_search_regex,
-        WorkspaceSearchIndex, WorkspaceSearchMatch, WorkspaceSearchScope,
-    };
     use crate::tui::workspace::{
         ContentIoFocus, ContentScrolls, ListPane, Rows, TextPair, WorkspaceDialogue,
         WorkspaceFocus, WorkspaceSession, WorkspaceSource, WorkspaceSourceKind,
@@ -1962,363 +1881,6 @@ mod tests {
             .unwrap()
             .expect("cursor block copy");
         assert_eq!(picked_units(&picked)[0].plain, "user text");
-    }
-
-    #[test]
-    fn workspace_search_defaults_to_dialogue_content() {
-        let sessions = vec![
-            workspace_test_session(
-                "alpha session",
-                WorkspaceSource::agent(AgentProvider::Codex),
-                &["camera"],
-            ),
-            workspace_test_session(
-                "target session",
-                WorkspaceSource::agent(AgentProvider::Claude),
-                &["lighting"],
-            ),
-        ];
-        let index = WorkspaceSearchIndex::new(&sessions);
-
-        let output = index.search(&sessions, "target session:lighting");
-
-        assert_eq!(
-            workspace_search_query("target session:lighting").0,
-            WorkspaceSearchScope::Content
-        );
-        assert_eq!(output.sessions.len(), 1);
-        assert_eq!(
-            output.sessions[0].source,
-            WorkspaceSource::agent(AgentProvider::Claude)
-        );
-        assert_eq!(output.sessions[0].title, "target session");
-        // Hit list is meta-only; body stays on the corpus / SessionColumn.
-        assert!(output.sessions[0].records.is_empty());
-        assert_eq!(output.matches.len(), 1);
-        assert_eq!(output.matches[0].dialogue_index, 0);
-        assert_eq!(
-            sessions[1].records[0]
-                .copy_text(sivtr_core::record::RecordTextMode::Combined, false, None)
-                .plain,
-            "target session:lighting"
-        );
-    }
-
-    #[test]
-    fn workspace_search_prefixes_select_session_or_dialogue_scope() {
-        let sessions = vec![workspace_test_session(
-            "photo critique",
-            WorkspaceSource::agent(AgentProvider::Codex),
-            &["lighting notes"],
-        )];
-        let index = WorkspaceSearchIndex::new(&sessions);
-
-        let session_results = index.search(&sessions, ">photo");
-        let dialogue_results = index.search(&sessions, "#lighting");
-        let content_results = index.search(&sessions, ">lighting");
-
-        assert_eq!(
-            workspace_search_query(">photo").0,
-            WorkspaceSearchScope::Session
-        );
-        assert_eq!(
-            workspace_search_query("#lighting").0,
-            WorkspaceSearchScope::Dialogue
-        );
-        assert_eq!(session_results.sessions.len(), 1);
-        assert_eq!(dialogue_results.sessions.len(), 1);
-        assert!(dialogue_results.sessions[0].records.is_empty());
-        assert_eq!(dialogue_results.matches.len(), 1);
-        assert_eq!(dialogue_results.matches[0].dialogue_index, 0);
-        assert!(content_results.sessions.is_empty());
-    }
-
-    #[test]
-    fn workspace_search_fingerprint_tracks_searchable_fields() {
-        let source = WorkspaceSource::agent(AgentProvider::Codex);
-        let sessions = vec![workspace_test_session("session", source, &["dialogue"])];
-        let fingerprint = workspace_search_fingerprint(
-            &sessions,
-            sessions.iter().map(|session| session.records.as_slice()),
-        );
-
-        let mut session_title_changed = sessions.clone();
-        session_title_changed[0].search_title = "renamed session".into();
-        assert_ne!(
-            fingerprint,
-            workspace_search_fingerprint(
-                &session_title_changed,
-                session_title_changed
-                    .iter()
-                    .map(|session| session.records.as_slice()),
-            )
-        );
-
-        let mut dialogue_title_changed = sessions.clone();
-        dialogue_title_changed[0].records[0].title = "renamed dialogue".into();
-        assert_ne!(
-            fingerprint,
-            workspace_search_fingerprint(
-                &dialogue_title_changed,
-                dialogue_title_changed
-                    .iter()
-                    .map(|session| session.records.as_slice()),
-            )
-        );
-
-        let mut body_changed = sessions;
-        body_changed[0].records[0].parts[0].data = sivtr_core::record::WorkPartData::User {
-            content: "changed body".into(),
-        };
-        assert_ne!(
-            fingerprint,
-            workspace_search_fingerprint(
-                &body_changed,
-                body_changed
-                    .iter()
-                    .map(|session| session.records.as_slice()),
-            )
-        );
-    }
-
-    #[test]
-    fn workspace_search_uses_case_insensitive_regex() {
-        let sessions = vec![workspace_test_session(
-            "Photo critique",
-            WorkspaceSource::agent(AgentProvider::Codex),
-            &["LIGHTING notes"],
-        )];
-        let index = WorkspaceSearchIndex::new(&sessions);
-
-        let session_results = index.search(&sessions, ">photo\\s+critique");
-        let dialogue_results = index.search(&sessions, "#lighting\\s+notes");
-        let content_results = index.search(&sessions, "photo critique:lighting\\s+notes");
-
-        assert_eq!(session_results.sessions.len(), 1);
-        assert_eq!(dialogue_results.sessions.len(), 1);
-        assert_eq!(content_results.sessions.len(), 1);
-    }
-
-    #[test]
-    fn workspace_search_invalid_regex_has_no_fallback_matches() {
-        let sessions = vec![workspace_test_session(
-            "photo critique",
-            WorkspaceSource::agent(AgentProvider::Codex),
-            &["lighting notes"],
-        )];
-        let index = WorkspaceSearchIndex::new(&sessions);
-
-        assert!(workspace_search_regex("(").is_none());
-        assert!(index.search(&sessions, "(").sessions.is_empty());
-        assert!(index.search(&sessions, ">photo(").sessions.is_empty());
-        assert!(index.search(&sessions, "#lighting(").sessions.is_empty());
-    }
-
-    #[test]
-    fn workspace_search_filters_dialogues_inside_matching_sessions() {
-        let sessions = vec![
-            workspace_test_session(
-                "codex session",
-                WorkspaceSource::agent(AgentProvider::Codex),
-                &["needle first", "miss"],
-            ),
-            workspace_test_session(
-                "claude session",
-                WorkspaceSource::agent(AgentProvider::Claude),
-                &["a1", "needle dialogue"],
-            ),
-        ];
-        let output = WorkspaceSearchIndex::new(&sessions).search(&sessions, "#needle");
-
-        assert_eq!(output.sessions.len(), 2);
-        assert_eq!(output.sessions[0].title, "codex session");
-        assert_eq!(output.sessions[1].title, "claude session");
-        assert!(output.sessions.iter().all(|s| s.records.is_empty()));
-        // dialogue_index is the original turn index in the full body.
-        assert_eq!(
-            output.matches,
-            vec![
-                WorkspaceSearchMatch {
-                    session_index: 0,
-                    dialogue_index: 0,
-                    at: WorkAt::Whole,
-                    matched_line: 1,
-                },
-                WorkspaceSearchMatch {
-                    session_index: 1,
-                    dialogue_index: 1,
-                    at: WorkAt::Whole,
-                    matched_line: 1,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn workspace_search_tracks_match_position_for_navigation() {
-        let sessions = vec![WorkspaceSession {
-            source: WorkspaceSource::agent(AgentProvider::Codex),
-            session_id: "session".to_string(),
-            modified: SystemTime::UNIX_EPOCH,
-            title: "session".to_string(),
-            search_title: "session".to_string(),
-            records: vec![workspace_test_record(
-                WorkspaceSource::agent(AgentProvider::Codex),
-                "dialogue",
-                "first\nneedle one\nmiddle\nneedle two",
-                0,
-            )],
-            body_loaded: true,
-        }];
-
-        let output = WorkspaceSearchIndex::new(&sessions).search(&sessions, "needle");
-
-        assert_eq!(
-            output.matches,
-            vec![
-                WorkspaceSearchMatch {
-                    session_index: 0,
-                    dialogue_index: 0,
-                    at: WorkAt::Part(1),
-                    matched_line: 2,
-                },
-                WorkspaceSearchMatch {
-                    session_index: 0,
-                    dialogue_index: 0,
-                    at: WorkAt::Part(1),
-                    matched_line: 4,
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn workspace_search_prefers_hidden_part_targets() {
-        let mut record = workspace_test_record(
-            WorkspaceSource::agent(AgentProvider::Codex),
-            "dialogue",
-            "visible text",
-            0,
-        );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("tool".to_string()),
-                input: tool_test_value("hidden cargo test".to_string()),
-            },
-        }];
-        let sessions = vec![WorkspaceSession {
-            source: WorkspaceSource::agent(AgentProvider::Codex),
-            session_id: "session".to_string(),
-            modified: SystemTime::UNIX_EPOCH,
-            title: "session".to_string(),
-            search_title: "session".to_string(),
-            records: vec![record],
-            body_loaded: true,
-        }];
-
-        let output = WorkspaceSearchIndex::new(&sessions).search(&sessions, "cargo");
-
-        assert_eq!(
-            output.matches,
-            vec![WorkspaceSearchMatch {
-                session_index: 0,
-                dialogue_index: 0,
-                at: WorkAt::Part(1),
-                matched_line: 1,
-            }]
-        );
-    }
-
-    #[test]
-    fn workspace_search_preserves_line_offsets_inside_part_targets() {
-        let mut record = workspace_test_record(
-            WorkspaceSource::agent(AgentProvider::Codex),
-            "dialogue",
-            "visible text",
-            0,
-        );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolResult {
-                call_id: None,
-                tool: None,
-                output: tool_test_value("first line\nneedle one\nmiddle\nneedle two".to_string()),
-                start_line: None,
-            },
-        }];
-        let sessions = vec![WorkspaceSession {
-            source: WorkspaceSource::agent(AgentProvider::Codex),
-            session_id: "session".to_string(),
-            modified: SystemTime::UNIX_EPOCH,
-            title: "session".to_string(),
-            search_title: "session".to_string(),
-            records: vec![record],
-            body_loaded: true,
-        }];
-
-        let output = WorkspaceSearchIndex::new(&sessions).search(&sessions, "needle");
-
-        assert_eq!(
-            output.matches,
-            vec![
-                WorkspaceSearchMatch {
-                    session_index: 0,
-                    dialogue_index: 0,
-                    at: WorkAt::Part(1),
-                    matched_line: 2,
-                },
-                WorkspaceSearchMatch {
-                    session_index: 0,
-                    dialogue_index: 0,
-                    at: WorkAt::Part(1),
-                    matched_line: 4,
-                },
-            ]
-        );
-        assert_eq!(output.matches[1].matched_line.saturating_sub(1), 3);
-    }
-
-    #[test]
-    fn workspace_search_target_ref_round_trips_part_match() {
-        let mut record = workspace_test_record(
-            WorkspaceSource::agent(AgentProvider::Codex),
-            "dialogue",
-            "visible text",
-            0,
-        );
-        record.parts = vec![sivtr_core::record::WorkPart {
-            seq: 1,
-            occurred_at: None,
-            data: sivtr_core::record::WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some("tool".to_string()),
-                input: tool_test_value("hidden cargo test".to_string()),
-            },
-        }];
-        let sessions = vec![WorkspaceSession {
-            source: WorkspaceSource::agent(AgentProvider::Codex),
-            session_id: "session".to_string(),
-            modified: SystemTime::UNIX_EPOCH,
-            title: "session".to_string(),
-            search_title: "session".to_string(),
-            records: vec![record],
-            body_loaded: true,
-        }];
-
-        let output = WorkspaceSearchIndex::new(&sessions).search(&sessions, "cargo");
-        let work_ref = workspace_search_target_ref(&output.sessions, &output.matches[0], &|s| {
-            sessions
-                .iter()
-                .find(|x| x.session_id == s.session_id && x.source == s.source)
-                .map(|x| x.records.as_slice())
-        })
-        .expect("work ref");
-
-        assert_eq!(work_ref.to_string(), "codex/test/1/p1");
     }
 
     #[test]

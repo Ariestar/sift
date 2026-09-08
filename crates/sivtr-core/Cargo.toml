@@ -32,6 +32,3 @@ ruzstd = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["processenv", "winbase", "wincon", "handleapi", "processthreadsapi", "shellapi", "winuser"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"

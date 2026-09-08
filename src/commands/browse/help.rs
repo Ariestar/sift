@@ -30,6 +30,8 @@ use super::PICK_CANCELLED_MESSAGE;
 pub(super) enum HelpDispatch {
     Continue,
     Picked(PickedContent),
+    /// Caller starts the full workspace search loader.
+    OpenSearch,
     /// Caller must refresh session/dialogue load (needs SessionColumn).
     Refresh,
     /// Caller opens the publication lifetime overlay.
@@ -52,9 +54,6 @@ pub(super) fn apply_workspace_help_action(
     content_pane: &mut ContentPane,
     content_blocks: (&[BlockText], &[BlockText]),
     show_help: &mut bool,
-    show_search: &mut bool,
-    search_query: &mut String,
-    search_dirty: &mut bool,
     content_at: Option<WorkAt>,
     line_filter: Option<&str>,
     sessions: &[crate::tui::workspace::WorkspaceSession],
@@ -294,12 +293,10 @@ pub(super) fn apply_workspace_help_action(
         }
         WorkspaceHelpAction::OpenSearch => {
             *show_help = false;
-            *show_search = true;
-            search_query.clear();
-            *search_dirty = true;
-            // Search replaces the session list wholesale: drop everything the
-            // panes below the sources were showing.
+            // Search replaces the session list wholesale; the picker starts
+            // the full-corpus loader after this dispatch returns.
             invalidate_panes_below(WorkspaceFocus::Source, rows, content_scrolls);
+            return Ok(HelpDispatch::OpenSearch);
         }
         WorkspaceHelpAction::BackOrCancel => match *focus {
             WorkspaceFocus::Source | WorkspaceFocus::Sessions => {

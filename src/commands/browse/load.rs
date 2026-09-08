@@ -38,6 +38,15 @@ pub type SessionKey = String;
 pub type SessionBody = Vec<WorkRecord>;
 pub type SessionPane = SlidingPane<SessionKey, SessionMeta, SessionBody>;
 
+pub(crate) fn query_source(source: &WorkspaceSource, selector: impl Into<String>) -> QuerySource {
+    let selector = selector.into();
+    if source.is_remote() {
+        QuerySource::remote(selector)
+    } else {
+        QuerySource::local(selector)
+    }
+}
+
 /// Cap concurrent session-body parse threads.
 const BODY_FETCH_CAP: usize = 2;
 
@@ -291,19 +300,13 @@ impl SourceLoadPump {
 
     fn spawn_meta(&mut self, idx: usize, source: &WorkspaceSource, gen: u64, budget: usize) {
         let budget = budget.clamp(FETCH_FLOOR, FETCH_CEILING);
-        let selector = source.selector();
-        let remote = source.is_remote();
         let cwd = self.cwd.clone();
         let tx = self.tx.clone();
         let source = source.clone();
         let spawned = thread::Builder::new()
             .name(format!("sivtr-meta-{idx}"))
             .spawn(move || {
-                let qs = if remote {
-                    QuerySource::remote(selector)
-                } else {
-                    QuerySource::local(selector)
-                };
+                let qs = query_source(&source, source.selector());
                 let (result, exhausted) = match workset::query_sources(
                     &[qs],
                     Filter::browse_session_page(budget),
@@ -350,7 +353,6 @@ impl SourceLoadPump {
     fn spawn_body(&mut self, idx: usize, source: &WorkspaceSource, session_id: &str) {
         let gen = self.body_generation.get(idx).copied().unwrap_or(0);
         let selector = source.selector();
-        let remote = source.is_remote();
         let cwd = self.cwd.clone();
         let tx = self.tx.clone();
         let source = source.clone();
@@ -359,11 +361,7 @@ impl SourceLoadPump {
             .name(format!("sivtr-body-{idx}"))
             .spawn(move || {
                 let sel = format!("{selector}/{session_id_owned}");
-                let qs = if remote {
-                    QuerySource::remote(sel)
-                } else {
-                    QuerySource::local(sel)
-                };
+                let qs = query_source(&source, sel);
                 let result = match workset::query_sources(&[qs], Filter::none(), Some(&cwd)) {
                     Ok(mut results) => match results.pop() {
                         Some(QuerySourceResult::Ok(mut set)) => match set.materialize_parts() {
@@ -516,7 +514,7 @@ pub struct SessionCtx<'a> {
     /// Merged sessions currently shown (for body keep mapping).
     pub sessions: &'a [WorkspaceSession],
     pub session_scope: &'a [bool],
-    /// When true, skip meta growth (search filter owns the list).
+    /// When true, the search result owns the full session corpus and its bodies.
     pub search_active: bool,
 }
 
@@ -583,25 +581,27 @@ impl Pane for SessionColumn {
     }
 
     fn ensure(&mut self, ctx: SessionCtx<'_>, input: &PaneInput<'_>) {
+        if ctx.search_active {
+            self.merged_len = ctx.sessions.len();
+            return;
+        }
         self.pump
             .drop_unselected(ctx.source_scope, &mut self.states);
-        if !ctx.search_active {
-            if input.force {
-                self.pump.refresh_selected(
-                    &self.sources,
-                    ctx.source_scope,
-                    &mut self.states,
-                    input.viewport,
-                );
-            } else {
-                self.pump.kick(
-                    &self.sources,
-                    ctx.source_scope,
-                    &mut self.states,
-                    input.viewport,
-                    false,
-                );
-            }
+        if input.force {
+            self.pump.refresh_selected(
+                &self.sources,
+                ctx.source_scope,
+                &mut self.states,
+                input.viewport,
+            );
+        } else {
+            self.pump.kick(
+                &self.sources,
+                ctx.source_scope,
+                &mut self.states,
+                input.viewport,
+                false,
+            );
         }
         let keep = body_keep_set(
             &self.sources,
@@ -612,7 +612,6 @@ impl Pane for SessionColumn {
         );
         self.pump
             .sync_bodies(&self.sources, &mut self.states, &keep);
-        self.merged_len = ctx.sessions.len();
     }
 
     fn len(&self) -> usize {

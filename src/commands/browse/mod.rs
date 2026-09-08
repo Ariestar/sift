@@ -15,6 +15,7 @@ mod panes;
 pub mod perf;
 mod picker;
 mod publish_overlay;
+mod search;
 mod selection;
 mod text;
 mod vim;

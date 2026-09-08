@@ -20,7 +20,6 @@ use crate::tui::pane::{
     active_item_style, panel_block, render_list_panel, render_panel_scrollbar, row_highlight,
     selection_dot, Panel, PanelScroll,
 };
-use crate::tui::search::{workspace_search_query, workspace_search_regex, WorkspaceSearchScope};
 use crate::tui::theme;
 use crate::tui::workspace::help::{workspace_footer_hotkeys, workspace_help_entries};
 use crate::tui::workspace::layout::{selected_index, workspace_layout};
@@ -50,10 +49,7 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
         dialogue_idx,
         view.content_at,
     );
-    let search_regex = view
-        .search
-        .as_ref()
-        .and_then(|search| workspace_search_regex(workspace_search_query(search.query).1));
+    let search_regex = view.search.as_ref().and_then(|search| search.regex);
 
     render_source_list(
         frame,
@@ -72,8 +68,6 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
         view.rows.source.scope_count(),
         &view.rows.sessions,
         &view.body_failures,
-        view.search.as_ref(),
-        search_regex.as_ref(),
         view.rows.range_start(WorkspaceFocus::Sessions),
         view.focus == WorkspaceFocus::Sessions,
     );
@@ -85,8 +79,6 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
         dialogues_pane,
         view.rows.sessions.scope_count(),
         view.rows.range_start(WorkspaceFocus::Dialogues),
-        view.search.as_ref(),
-        search_regex.as_ref(),
         view.focus == WorkspaceFocus::Dialogues,
     );
 
@@ -94,11 +86,7 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
     // this redraw; reuse them instead of laying the content out a second time.
     let frame_io = view.content_frame;
     let content_active = view.focus == WorkspaceFocus::Content;
-    let content_search = view
-        .search
-        .as_ref()
-        .filter(|search| search.scope == WorkspaceSearchScope::Content)
-        .and(search_regex.as_ref());
+    let content_search = view.search.as_ref().and(search_regex);
     let title_suffix = content_title_suffix(
         view.dialogue_selection
             .iter()
@@ -259,7 +247,7 @@ fn render_footer(
         })
     } else if search.is_some() {
         let mut spans = if search.map(|search| search.input_open).unwrap_or(false) {
-            footer_control_spans("type search  > session  # dialogue  Enter accept  Esc clear")
+            footer_control_spans("type search  Enter accept  Esc clear")
         } else {
             footer_control_spans("n next  N previous  Esc clear search  / edit")
         };
@@ -475,7 +463,13 @@ fn render_search_box(frame: &mut Frame, area: Rect, search: WorkspaceSearchView<
 }
 
 pub(crate) fn search_box_title(search: &WorkspaceSearchView<'_>) -> String {
-    let result_label = if search.query.trim().is_empty() {
+    let result_label = if let Some(error) = search.error {
+        if error == "loading workspace" {
+            "loading".to_string()
+        } else {
+            "error".to_string()
+        }
+    } else if search.query.trim().is_empty() {
         "ready".to_string()
     } else if let Some(position) = search_position_label(search) {
         format!("[{position}]")
@@ -484,17 +478,17 @@ pub(crate) fn search_box_title(search: &WorkspaceSearchView<'_>) -> String {
     } else {
         format!("{} results", search.result_count)
     };
-    if search.scope == WorkspaceSearchScope::Content {
-        format!("Search  ({result_label})")
-    } else {
-        format!("Search {}  ({})", search.scope.label(), result_label)
-    }
+    format!("Search  ({result_label})")
 }
 
 pub(crate) fn search_box_body(search: &WorkspaceSearchView<'_>) -> String {
-    match search.current_target.as_deref() {
+    let body = match search.current_target.as_deref() {
         Some(target) => format!("{}\n\nTarget: {target}", search.query),
         None => search.query.to_string(),
+    };
+    match search.error {
+        Some(error) => format!("{body}\n\n{error}"),
+        None => body,
     }
 }
 
@@ -728,8 +722,6 @@ fn render_session_list(
     marked_sources: usize,
     pane: &ListPane,
     body_failures: &HashSet<(WorkspaceSource, String)>,
-    search: Option<&WorkspaceSearchView<'_>>,
-    search_regex: Option<&Regex>,
     range_anchor: Option<usize>,
     active: bool,
 ) {
@@ -740,14 +732,11 @@ fn render_session_list(
         .map(|(idx, choice)| {
             let selected = pane.scope_mask()[idx];
             let base_style = row_highlight(idx, cursor_idx, range_anchor).unwrap_or_default();
-            let highlight = search
-                .filter(|search| search.scope == WorkspaceSearchScope::Session)
-                .and(search_regex);
             ListItem::new(session_row_line(
                 choice,
                 selected,
                 base_style,
-                highlight,
+                None,
                 body_failures.contains(&(choice.source.clone(), choice.session_id.clone())),
             ))
         })
@@ -781,8 +770,6 @@ fn render_dialogue_list(
     pane: &RowCursor,
     marked_sessions: usize,
     range_anchor: Option<usize>,
-    search: Option<&WorkspaceSearchView<'_>>,
-    search_regex: Option<&Regex>,
     active: bool,
 ) {
     let highlighted_idx = pane.cursor();
@@ -795,16 +782,9 @@ fn render_dialogue_list(
             // always visible so it survives pane switches.
             let marker = format!("{} ", selection_dot(selected));
             let line = format!("{marker}{title}");
-            let highlight = search
-                .filter(|search| search.scope == WorkspaceSearchScope::Dialogue)
-                .and(search_regex);
             match row_highlight(idx, highlighted_idx, range_anchor) {
-                Some(style) => ListItem::new(Line::from(highlight_spans(&line, highlight, style))),
-                None => ListItem::new(Line::from(highlight_spans(
-                    &line,
-                    highlight,
-                    Style::default(),
-                ))),
+                Some(style) => ListItem::new(Line::from(highlight_spans(&line, None, style))),
+                None => ListItem::new(Line::from(highlight_spans(&line, None, Style::default()))),
             }
         })
         .collect();

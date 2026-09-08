@@ -30,7 +30,6 @@ pub(super) fn refresh_next_level(
     sessions: &[WorkspaceSession],
     sessions_pane: &mut SessionColumn,
     all_sessions: &mut Vec<WorkspaceSession>,
-    search_dirty: &mut bool,
     viewport: Viewport,
 ) {
     let sources = sessions_pane.sources();
@@ -47,9 +46,7 @@ pub(super) fn refresh_next_level(
     }
 
     sessions_pane.refresh(&sources_to_reload, viewport);
-    // Meta list only; search rebuild (with bodies) happens on search_dirty in picker.
     *all_sessions = sessions_pane.collect(rows.source.scope_mask());
-    *search_dirty = true;
 }
 
 fn parent_source_mask(

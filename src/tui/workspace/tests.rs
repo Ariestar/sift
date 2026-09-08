@@ -10,7 +10,6 @@ use super::render::{
 use crate::tui::content::io::ExpandedBlocks;
 use crate::tui::content::text::{workspace_content_io_texts, workspace_content_text};
 use crate::tui::content::view::ContentViewMode;
-use crate::tui::search::WorkspaceSearchScope;
 use sivtr_core::ai::AgentProvider;
 use sivtr_core::record::{WorkAt, WorkRecord, WorkRef};
 
@@ -624,11 +623,12 @@ fn current_content_ref_round_trips_active_part_target() {
 fn search_box_body_includes_current_target_ref() {
     let search = WorkspaceSearchView {
         query: "needle",
-        scope: WorkspaceSearchScope::Content,
         result_count: 1,
         current_match: Some(0),
         match_count: 1,
         current_target: Some("codex/session/1/4".to_string()),
+        regex: None,
+        error: None,
         input_open: true,
     };
 

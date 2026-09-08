@@ -5,9 +5,8 @@ use crossterm::event::KeyCode;
 
 use crate::tui::content::block::{dialogue_blocks, Block};
 use crate::tui::content::view::{line_count, ContentViewMode};
-use crate::tui::search::{WorkspaceSearchMatch, WorkspaceSearchOutput};
-use crate::tui::workspace::{WorkspaceDialogue, WorkspaceSession, WorkspaceSource};
-use sivtr_core::record::{WorkAt, WorkRecord, WorkRef};
+use crate::tui::workspace::{WorkspaceDialogue, WorkspaceSource};
+use sivtr_core::record::{WorkAt, WorkRecord};
 
 use crate::commands::memory::workset::{WorkSelectionAction, WorkSelectionTarget, WorkSet};
 
@@ -268,34 +267,6 @@ pub(super) fn handle_line_filter_paste(
         line_filter.push_str(&filtered);
         *line_filter_error = None;
     }
-}
-
-pub(super) fn workspace_search_target_ref<'a>(
-    sessions: &'a [WorkspaceSession],
-    matched: &WorkspaceSearchMatch,
-    records: &dyn Fn(&WorkspaceSession) -> Option<&'a [sivtr_core::record::WorkRecord]>,
-) -> Option<WorkRef> {
-    let session = sessions.get(matched.session_index)?;
-    records(session)?
-        .get(matched.dialogue_index)
-        .map(|record| record.work_ref.with_at(matched.at))
-}
-
-pub(super) fn active_workspace_content_at(
-    search_has_query: bool,
-    search_output: &WorkspaceSearchOutput,
-    search_cursor: usize,
-    session_idx: usize,
-    selected_dialogues: &[bool],
-    dialogue_idx: usize,
-) -> Option<WorkAt> {
-    if !search_has_query || selected_dialogues.iter().any(|selected| *selected) {
-        return None;
-    }
-
-    let matched = search_output.matches.get(search_cursor)?;
-    (matched.session_index == session_idx && matched.dialogue_index == dialogue_idx)
-        .then_some(matched.at)
 }
 
 #[cfg(test)]
