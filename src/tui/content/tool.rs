@@ -1,27 +1,30 @@
 //! Shape-driven tool display for the content pane.
 //!
-//! Tool calls are classified by category — command (`$ cmd`), read (`$ read
-//! path` + code preview), search (`$ grep pattern`), edit (diff preview),
-//! web (`$ webfetch url`) — and get per-tool tags (`<:read: src/main.rs:12-30:>`)
-//! instead of the generic `<:tool:Name call:>` marker. The formatter keys off
-//! the normalized `tool` name and the `input` / `output` JSON, so every
-//! provider (claude, grok, codex, opencode, …) flows through one code path —
-//! display only; evidence export keeps its original markers.
+//! Tool actions are classified by category — read (`$ read path` + code
+//! preview), search (`$ grep pattern`), edit (diff preview), web (`$
+//! webfetch url`) — and get per-tool tags (`<:read: src/main.rs:12-30:>`)
+//! instead of the generic `<:tool:Name call:>` marker. Shell actions read
+//! as the terminal transcript they are: the `$` command line, then the
+//! output, whoever ran them. The formatter keys off the action target and
+//! its input / output, so every provider (claude, grok, codex, opencode,
+//! …) flows through one code path — display only; evidence export keeps
+//! its original markers.
 
 use similar::{ChangeTag, TextDiff};
 
 use serde_json::Value;
-use sivtr_core::record::{WorkPart, WorkPartData};
+use sivtr_core::record::{
+    ProjectionSlice, WorkContent, WorkContentBlock, WorkPart, WorkPartBody, WorkTarget,
+};
 
 /// Long input expressions are truncated to fit a tag line.
 const MAX_EXPR: usize = 40;
 
-/// Tool category: drives how a tool call is displayed.
+/// Tool category: drives how a tool call is displayed. Shell execution is
+/// not a category here — the reducer normalizes shell tools to
+/// `WorkTarget::Shell` before display.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolCategory {
-    /// Shell-like: `$ command` is the whole instruction (`bash`, `exec`,
-    /// `run_terminal_command`, `shell_command`).
-    Command,
     /// File read: `$ read path:lines`, code preview from the result.
     Read,
     /// Text search: `$ grep pattern`.
@@ -40,24 +43,11 @@ struct ToolSpec {
 }
 
 /// Known tools by provider name (claude `Read`, opencode `read`, codex
-/// `apply_patch`/`exec`, grok build `read_file`/`run_terminal_command`/
-/// `search_replace`); `None` for unknown tools that keep the generic marker.
+/// `apply_patch`, grok build `read_file`/`search_replace`); `None` for
+/// unknown tools that keep the generic marker.
 fn tool_spec(tool: &str) -> Option<&'static ToolSpec> {
     use ToolCategory::*;
     Some(match tool.to_ascii_lowercase().as_str() {
-        "bash"
-        | "shell"
-        | "run_terminal_command"
-        | "shell_command"
-        | "run_command"
-        | "run_command_or_subagent" => &ToolSpec {
-            category: Command,
-            name: "bash",
-        },
-        "exec" => &ToolSpec {
-            category: Command,
-            name: "exec",
-        },
         "read" | "read_file" => &ToolSpec {
             category: Read,
             name: "read",
@@ -148,23 +138,50 @@ pub(crate) fn tool_tag(tool: &str, value: &Value) -> Option<String> {
     ))
 }
 
-/// New-style folded tag for a tool part, when the tool is known: calls get
-/// the expression tag, results the bare name tag.
+/// New-style folded tag for an action part, when the shape is understood:
+/// MCP tools always (`<:sivtr: sivtr_search:>`), shell commands as the
+/// expression (`<:shell: ls:>`), known tools as the expression tag for a
+/// call (`<:bash: ls:>`) or the bare name for a result. `None` keeps the
+/// generic `<:tool:Name call:>` marker. Long expressions are truncated to
+/// fit the tag line.
 pub(crate) fn tool_tag_for_part(part: &WorkPart) -> Option<String> {
-    match &part.data {
-        WorkPartData::ToolCall { tool, input, .. } => {
-            tool_tag(tool.as_deref().unwrap_or_default(), input)
+    let WorkPartBody::Action {
+        target,
+        input,
+        output,
+        ..
+    } = &part.body
+    else {
+        return None;
+    };
+    match target {
+        WorkTarget::Mcp { server, tool } => Some(format!("<:{server}: {tool}:>")),
+        WorkTarget::Shell => {
+            let command = shell_command(input.as_ref())?;
+            Some(format!(
+                "<:shell: {}:>",
+                crate::tui::content::truncate_chars(&command, MAX_EXPR)
+            ))
         }
-        WorkPartData::ToolResult { tool, .. } => {
-            let tool = tool.as_deref().unwrap_or_default();
-            if is_known_tool(tool) {
-                Some(format!("<:{}:>", tool_display_name(tool)))
+        WorkTarget::Tool { name } => {
+            let tool = name.as_deref().unwrap_or_default();
+            if output.is_empty() {
+                let input = input.as_ref()?;
+                let WorkContent::Json(value) = input else {
+                    return None;
+                };
+                tool_tag(tool, value)
             } else {
-                None
+                is_known_tool(tool).then(|| format!("<:{}:>", tool_display_name(tool)))
             }
         }
-        _ => None,
+        WorkTarget::Agent { .. } => None,
     }
+}
+
+fn shell_command(input: Option<&WorkContent>) -> Option<String> {
+    let command = input?.text().trim_end().to_string();
+    (!command.is_empty()).then_some(command)
 }
 
 /// Whether the new `$` format applies to a tool call: MCP tools and
@@ -177,32 +194,79 @@ fn tool_renderable_call(tool: &str, input: &Value) -> bool {
         || tool_input_expr(tool, input).is_some()
         || diff_preview(tool, input).is_some()
 }
-/// Display body of one part: the `$`/`>` tool format for understood tool
-/// shapes, the evidence format otherwise.
-pub(crate) fn part_body_text(part: &WorkPart) -> String {
-    match &part.data {
-        WorkPartData::ToolCall { tool, input, .. } => {
-            let tool = tool.as_deref().unwrap_or_default();
-            if tool_renderable_call(tool, input) {
-                tool_call_text(tool, input)
-            } else {
-                sivtr_core::record::format_work_part(part)
-            }
-        }
-        WorkPartData::ToolResult {
-            tool,
+/// Display body of one part in the slice a projection asks for: the `$`/`>`
+/// tool format for understood tool shapes, shell actions as terminal
+/// transcripts, the evidence format otherwise.
+pub(crate) fn part_body_text(part: &WorkPart, slice: ProjectionSlice) -> String {
+    let WorkPartBody::Action {
+        target,
+        input,
+        output,
+        ..
+    } = &part.body
+    else {
+        return sivtr_core::record::format_work_part(part);
+    };
+    match target {
+        WorkTarget::Shell => sivtr_core::record::format_shell_action(part, slice),
+        WorkTarget::Tool { name } => tool_body(
+            part,
+            slice,
+            name.as_deref().unwrap_or_default(),
+            input.as_ref(),
             output,
-            start_line,
-            ..
-        } => {
-            let tool = tool.as_deref().unwrap_or_default();
-            if is_known_tool(tool) {
-                tool_result_text(tool, output, *start_line)
-            } else {
-                sivtr_core::record::format_work_part(part)
-            }
-        }
-        _ => sivtr_core::record::format_work_part(part),
+        ),
+        WorkTarget::Mcp { server, tool } => tool_body(
+            part,
+            slice,
+            &format!("mcp__{server}__{tool}"),
+            input.as_ref(),
+            output,
+        ),
+        WorkTarget::Agent { .. } => sivtr_core::record::format_work_part(part),
+    }
+}
+
+/// Body of a tool action: the `$` call line when the input shape is
+/// understood, the result body for known tools; otherwise the evidence
+/// format so no payload is lost.
+fn tool_body(
+    part: &WorkPart,
+    slice: ProjectionSlice,
+    tool: &str,
+    input: Option<&WorkContent>,
+    output: &[WorkContentBlock],
+) -> String {
+    let json_input = match input {
+        Some(WorkContent::Json(value)) => Some(value),
+        _ => None,
+    };
+    let call = json_input
+        .filter(|_| matches!(slice, ProjectionSlice::Whole | ProjectionSlice::Input))
+        .filter(|value| tool_renderable_call(tool, value))
+        .map(|value| tool_call_text(tool, value));
+    let result = output
+        .first()
+        .filter(|_| matches!(slice, ProjectionSlice::Whole | ProjectionSlice::Output))
+        .filter(|_| is_known_tool(tool))
+        .and_then(|block| match &block.content {
+            WorkContent::Json(value) => Some(tool_result_text(tool, value, block.start_line)),
+            _ => None,
+        });
+    match (call, result) {
+        (Some(call), Some(result)) => format!("{call}\n{result}"),
+        (Some(call), None) => call,
+        (None, Some(result)) => result,
+        // The evidence format renders only when the projection asks for the
+        // whole part; a sliced view shows just its own side.
+        (None, None) => match slice {
+            ProjectionSlice::Whole => sivtr_core::record::format_work_part(part),
+            ProjectionSlice::Input => input
+                .map(sivtr_core::record::WorkContent::text)
+                .map(std::borrow::Cow::into_owned)
+                .unwrap_or_default(),
+            ProjectionSlice::Output => sivtr_core::record::output_blocks_text(output),
+        },
     }
 }
 
@@ -217,20 +281,11 @@ fn use_tool_name(input: &Value) -> Option<String> {
 }
 
 /// Input expression from a tool call's input JSON: `src/main.rs:12-30`,
-/// `export function foo`, `cd src && make`… `None` when the shape is unknown.
-/// Full text; callers truncate for tag lines.
+/// `export function foo`… `None` when the shape is unknown. Full text;
+/// callers truncate for tag lines.
 fn tool_input_expr(tool: &str, input: &Value) -> Option<String> {
     let spec = tool_spec(tool)?;
     let expr = match spec.category {
-        ToolCategory::Command => match input {
-            Value::String(script) => script.trim().to_string(),
-            _ => input
-                .as_object()?
-                .get("command")?
-                .as_str()?
-                .trim()
-                .to_string(),
-        },
         ToolCategory::Read => {
             let obj = input.as_object()?;
             let path = path_field(obj)?;
@@ -303,14 +358,9 @@ fn line_range(obj: &serde_json::Map<String, Value>) -> Option<String> {
 pub(crate) fn tool_call_text(tool: &str, input: &Value) -> String {
     let name = tool_call_name(tool, input);
     let expr = tool_input_expr(tool, input);
-    let line = if tool_spec(tool).is_some_and(|spec| spec.category == ToolCategory::Command) {
-        // `$` is the shell prompt: the command is the whole instruction.
-        format!("$ {}", expr.unwrap_or(name))
-    } else {
-        match expr {
-            Some(expr) => format!("$ {name} {expr}"),
-            None => format!("$ {name}"),
-        }
+    let line = match expr {
+        Some(expr) => format!("$ {name} {expr}"),
+        None => format!("$ {name}"),
     };
     match diff_preview(tool, input) {
         Some(preview) => format!("{line}\n{preview}"),
@@ -452,38 +502,60 @@ fn output_lines(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sivtr_core::record::{WorkActionStatus, WorkActor, WorkTarget};
 
-    fn call(tool: &str, input: serde_json::Value) -> WorkPart {
+    const SLICE: ProjectionSlice = ProjectionSlice::Whole;
+
+    fn tool_action(
+        seq: usize,
+        tool: &str,
+        input: Option<Value>,
+        output: Option<(Value, Option<u64>)>,
+    ) -> WorkPart {
+        let has_output = output.is_some();
         WorkPart {
-            seq: 1,
+            seq,
             occurred_at: None,
-            data: WorkPartData::ToolCall {
-                call_id: None,
-                tool: Some(tool.to_string()),
-                input,
+            body: WorkPartBody::Action {
+                id: format!("a{seq}"),
+                actor: WorkActor::Agent,
+                target: WorkTarget::Tool {
+                    name: Some(tool.to_string()),
+                },
+                title: None,
+                input: input.map(WorkContent::Json),
+                output: output
+                    .map(|(value, start_line)| {
+                        vec![WorkContentBlock {
+                            content: WorkContent::Json(value),
+                            start_line,
+                        }]
+                    })
+                    .unwrap_or_default(),
+                status: if has_output {
+                    WorkActionStatus::Completed
+                } else {
+                    WorkActionStatus::InProgress
+                },
+                exit_code: None,
             },
         }
     }
 
-    fn result(tool: &str, output: serde_json::Value) -> WorkPart {
+    fn call(tool: &str, input: Value) -> WorkPart {
+        tool_action(1, tool, Some(input), None)
+    }
+
+    fn result(tool: &str, output: Value) -> WorkPart {
         result_with_line(tool, output, None)
     }
 
-    fn result_with_line(
-        tool: &str,
-        output: serde_json::Value,
-        start_line: Option<u64>,
-    ) -> WorkPart {
-        WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::ToolResult {
-                call_id: None,
-                tool: Some(tool.to_string()),
-                output,
-                start_line,
-            },
-        }
+    fn result_with_line(tool: &str, output: Value, start_line: Option<u64>) -> WorkPart {
+        tool_action(2, tool, None, Some((output, start_line)))
+    }
+
+    fn shell(seq: usize, command: Option<&str>, output: Option<&str>) -> WorkPart {
+        crate::test_fixtures::shell_action_part(seq, command.unwrap_or(""), output)
     }
 
     #[test]
@@ -499,6 +571,29 @@ mod tests {
     }
 
     #[test]
+    fn mcp_targets_render_as_server_colon_tool() {
+        let part = WorkPart {
+            seq: 1,
+            occurred_at: None,
+            body: WorkPartBody::Action {
+                id: "mcp".to_string(),
+                actor: WorkActor::Agent,
+                target: WorkTarget::Mcp {
+                    server: "sivtr".to_string(),
+                    tool: "sivtr_search".to_string(),
+                },
+                title: None,
+                input: Some(WorkContent::Json(serde_json::json!({"query": "x"}))),
+                output: Vec::new(),
+                status: WorkActionStatus::InProgress,
+                exit_code: None,
+            },
+        };
+        assert_eq!(tool_tag_for_part(&part).unwrap(), "<:sivtr: sivtr_search:>");
+        assert_eq!(part_body_text(&part, SLICE), "$ sivtr: sivtr_search");
+    }
+
+    #[test]
     fn known_tools_get_canonical_names_and_exprs() {
         let read = call(
             "Read",
@@ -508,7 +603,7 @@ mod tests {
             tool_tag_for_part(&read).unwrap(),
             "<:read: src/main.rs:12-30:>"
         );
-        assert_eq!(part_body_text(&read), "$ read src/main.rs:12-30");
+        assert_eq!(part_body_text(&read, SLICE), "$ read src/main.rs:12-30");
 
         let read_grok = call(
             "read",
@@ -524,17 +619,27 @@ mod tests {
             tool_tag_for_part(&grep).unwrap(),
             "<:grep: export function:>"
         );
-        assert_eq!(part_body_text(&grep), "$ grep export function");
+        assert_eq!(part_body_text(&grep, SLICE), "$ grep export function");
+    }
 
-        let bash = call(
-            "Bash",
-            serde_json::json!({"command": "cd src && cargo build"}),
-        );
+    #[test]
+    fn shell_actions_render_command_and_output() {
+        let action = shell(1, Some("cd src && cargo build"), None);
         assert_eq!(
-            tool_tag_for_part(&bash).unwrap(),
-            "<:bash: cd src && cargo build:>"
+            tool_tag_for_part(&action).unwrap(),
+            "<:shell: cd src && cargo build:>"
         );
-        assert_eq!(part_body_text(&bash), "$ cd src && cargo build");
+        assert_eq!(part_body_text(&action, SLICE), "$ cd src && cargo build");
+
+        let with_output = shell(2, Some("ls"), Some("src\ntarget"));
+        assert_eq!(part_body_text(&with_output, SLICE), "$ ls\nsrc\ntarget");
+
+        // Output-only and command-only halves render their slice.
+        assert_eq!(part_body_text(&with_output, ProjectionSlice::Input), "$ ls");
+        assert_eq!(
+            part_body_text(&with_output, ProjectionSlice::Output),
+            "src\ntarget"
+        );
     }
 
     #[test]
@@ -548,7 +653,7 @@ mod tests {
         );
         assert_eq!(tool_tag_for_part(&write).unwrap(), "<:write: notes.md:>");
         assert_eq!(
-            part_body_text(&write),
+            part_body_text(&write, SLICE),
             "$ write notes.md\n```diff\n+line one\n+line two\n```"
         );
 
@@ -563,7 +668,7 @@ mod tests {
         );
         assert_eq!(tool_tag_for_part(&edit).unwrap(), "<:edit: a.rs:>");
         assert_eq!(
-            part_body_text(&edit),
+            part_body_text(&edit, SLICE),
             "$ edit a.rs\n```diff\n-old\n+new\n```"
         );
     }
@@ -580,7 +685,7 @@ mod tests {
                 "new_string": "fn main() {\n    println!(\"new\");\n}",
             }),
         );
-        let text = part_body_text(&edit);
+        let text = part_body_text(&edit, SLICE);
         assert!(text.contains(" fn main() {"), "context missing: {text}");
         assert!(text.contains("-    println!(\"old\");"), "{text}");
         assert!(text.contains("+    println!(\"new\");"), "{text}");
@@ -590,14 +695,20 @@ mod tests {
     #[test]
     fn read_result_previews_as_code_block_and_others_as_output_lines() {
         let read_result = result("Read", serde_json::json!("fn main() {}\n"));
-        assert_eq!(part_body_text(&read_result), "```\nfn main() {}\n```");
+        assert_eq!(
+            part_body_text(&read_result, SLICE),
+            "```\nfn main() {}\n```"
+        );
 
         // A numbered read result shifts the code gutter to the file's line.
         let numbered = result_with_line("Read", serde_json::json!("line one\nline two"), Some(775));
-        assert_eq!(part_body_text(&numbered), "```775\nline one\nline two\n```");
+        assert_eq!(
+            part_body_text(&numbered, SLICE),
+            "```775\nline one\nline two\n```"
+        );
 
-        let bash_result = result("Bash", serde_json::json!("ok\nwarning"));
-        assert_eq!(part_body_text(&bash_result), "> ok\n> warning");
+        let fetch_result = result("webfetch", serde_json::json!("ok\nwarning"));
+        assert_eq!(part_body_text(&fetch_result, SLICE), "> ok\n> warning");
 
         // Text grep results fence as a structured search block; JSON results
         // (opencode's search_files) keep their data shape as a JSON block.
@@ -606,12 +717,12 @@ mod tests {
             serde_json::json!("Found 2 matching lines\nD:\\Coding\\AGENTS.md\n31:- rule\n"),
         );
         assert_eq!(
-            part_body_text(&text_match),
+            part_body_text(&text_match, SLICE),
             "```grep\nFound 2 matching lines\nD:\\Coding\\AGENTS.md\n31:- rule\n```"
         );
         let json_result = result("Grep", serde_json::json!([{"file": "a.rs", "line": 1}]));
         assert_eq!(
-            part_body_text(&json_result),
+            part_body_text(&json_result, SLICE),
             "```json\n[\n  {\n    \"file\": \"a.rs\",\n    \"line\": 1\n  }\n]\n```"
         );
     }
@@ -637,7 +748,7 @@ mod tests {
         );
         assert_eq!(tool_tag_for_part(&edit).unwrap(), "<:edit: a.rs:>");
         assert_eq!(
-            part_body_text(&edit),
+            part_body_text(&edit, SLICE),
             "$ edit a.rs\n```diff\n-old\n+new\n```"
         );
 
@@ -658,13 +769,6 @@ mod tests {
             tool_tag_for_part(&read).unwrap(),
             "<:read: src/main.rs:12-30:>"
         );
-
-        let bash = call(
-            "run_terminal_command",
-            serde_json::json!({"command": "cargo build"}),
-        );
-        assert_eq!(tool_tag_for_part(&bash).unwrap(), "<:bash: cargo build:>");
-        assert_eq!(part_body_text(&bash), "$ cargo build");
 
         let edit = call(
             "search_replace",
@@ -688,7 +792,10 @@ mod tests {
             tool_tag_for_part(&use_tool).unwrap(),
             "<:context7: resolve-library-id:>"
         );
-        assert_eq!(part_body_text(&use_tool), "$ context7: resolve-library-id");
+        assert_eq!(
+            part_body_text(&use_tool, SLICE),
+            "$ context7: resolve-library-id"
+        );
     }
 
     #[test]
@@ -699,46 +806,38 @@ mod tests {
         );
         assert_eq!(tool_tag_for_part(&patch).unwrap(), "<:patch:>");
         assert_eq!(
-            part_body_text(&patch),
+            part_body_text(&patch, SLICE),
             "$ patch\n```diff\n*** Begin Patch\n*** Update File: a.rs\n@@\n-old\n+new\n```"
         );
     }
 
     #[test]
-    fn exec_is_a_command_like_bash() {
+    fn shell_scripts_truncate_in_the_tag_line() {
         let script =
             "const skill = await tools.shell_command({command:\"cargo build\"});\ntext(skill);";
-        let exec = call("exec", serde_json::json!(script));
-        // Command category: `$` line with the command, tag with the tool
-        // name, long scripts truncated to fit the tag line.
+        let exec = shell(1, Some(script), None);
+        // The whole script is the command; long ones truncate to fit the tag.
         let tag = tool_tag_for_part(&exec).unwrap();
-        assert!(tag.starts_with("<:exec: const skill = await tools.shell_command("));
+        assert!(tag.starts_with("<:shell: const skill = await tools.shell_command("));
         assert!(tag.ends_with("…:>"));
-        assert_eq!(part_body_text(&exec), format!("$ {script}"));
-
-        let shell = call(
-            "shell_command",
-            serde_json::json!({"command": "cargo test"}),
-        );
-        assert_eq!(tool_tag_for_part(&shell).unwrap(), "<:bash: cargo test:>");
-        assert_eq!(part_body_text(&shell), "$ cargo test");
+        assert_eq!(part_body_text(&exec, SLICE), format!("$ {script}"));
     }
 
     #[test]
     fn unknown_tools_keep_the_generic_marker() {
         let unknown = call("wait", serde_json::json!({"cell_id": "1"}));
         assert_eq!(tool_tag_for_part(&unknown), None);
-        assert!(part_body_text(&unknown).contains("<:tool:wait call:>"));
+        assert!(part_body_text(&unknown, SLICE).contains("<:tool:wait call:>"));
     }
 
     #[test]
     fn long_expressions_are_truncated() {
         let long_command = "x".repeat(100);
-        let bash = call("Bash", serde_json::json!({"command": long_command}));
-        let tag = tool_tag_for_part(&bash).unwrap();
+        let action = shell(1, Some(&long_command), None);
+        let tag = tool_tag_for_part(&action).unwrap();
         assert_eq!(
             tag.chars().count(),
-            "<:bash: :>".chars().count() + MAX_EXPR + 1 // + "…"
+            "<:shell: :>".chars().count() + MAX_EXPR + 1 // + "…"
         );
         assert!(tag.ends_with("…:>"));
     }

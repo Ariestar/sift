@@ -99,15 +99,16 @@ pub(super) fn new(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::message_part;
     use sivtr_core::agents::AgentProvider;
     use sivtr_core::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
-        WorkSource, WorkTime,
+        MessageRole, WorkChannel, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource,
+        WorkTime, RECORD_SCHEMA_VERSION,
     };
 
     fn record() -> WorkRecord {
         WorkRecord {
-            schema_version: 3,
+            schema_version: RECORD_SCHEMA_VERSION,
             work_ref: WorkRef::agent(AgentProvider::Codex, "session", 1),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
@@ -124,20 +125,8 @@ mod tests {
             status: None,
             title: "Demo".into(),
             parts: vec![
-                WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: WorkPartData::User {
-                        content: "hello".into(),
-                    },
-                },
-                WorkPart {
-                    seq: 2,
-                    occurred_at: None,
-                    data: WorkPartData::Assistant {
-                        content: "reply".into(),
-                    },
-                },
+                message_part(1, MessageRole::User, "hello"),
+                message_part(2, MessageRole::Assistant, "reply"),
             ],
         }
     }

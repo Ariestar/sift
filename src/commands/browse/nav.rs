@@ -278,17 +278,16 @@ pub(super) fn source_list_index(
 #[cfg(test)]
 mod tests {
     use super::{move_content_cursor, row_list_index, ContentBlockCursor};
-    use crate::tui::content::block::BlockText;
+    use crate::tui::content::block::{BlockRole, BlockText};
     use crate::tui::workspace::{ContentScrolls, Rows};
     use ratatui::layout::Rect;
-    use sivtr_core::record::WorkPartKind;
 
     fn block(id: usize) -> BlockText {
         BlockText {
             id,
             text: String::new(),
             tight: false,
-            kind: WorkPartKind::Output,
+            role: BlockRole::Shell,
         }
     }
 

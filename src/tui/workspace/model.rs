@@ -3,11 +3,11 @@
 use ratatui::prelude::Color;
 use ratatui::widgets::ListState;
 use sivtr_core::agents::AgentProvider;
-use sivtr_core::record::{WorkAt, WorkRecord, WorkRef, WorkScope};
+use sivtr_core::record::{ProjectionSlice, WorkAt, WorkRecord, WorkRef, WorkScope};
 use std::collections::HashSet;
 use std::time::SystemTime;
 
-use crate::tui::content::block::{dialogue_block_id, fold_label_for_part, BlockText};
+use crate::tui::content::block::{dialogue_block_id, fold_label_for_part, BlockRole, BlockText};
 use crate::tui::content::io::{
     ContentIoFocus, ContentIoFrame, ContentIoTexts, ContentScrolls, ExpandedBlocks,
 };
@@ -228,21 +228,21 @@ impl WorkspaceDialogue {
             let Some(part) = record.part_for_at(target) else {
                 return ContentIoTexts::new(Vec::new(), Vec::new());
             };
-            let input = part.kind().is_input();
+            let input = part.is_input();
             let block_id = dialogue_block_id(record, part.seq).expect("target part has a block");
             let shown = match mode {
                 ContentViewMode::Raw => true,
-                ContentViewMode::Reading => expanded.expanded(block_id, part.kind().is_structure()),
+                ContentViewMode::Reading => expanded.expanded(block_id, part.is_structure()),
             };
             let segment = BlockText {
                 id: block_id,
                 text: if shown {
-                    crate::tui::content::tool::part_body_text(part)
+                    crate::tui::content::tool::part_body_text(part, ProjectionSlice::Whole)
                 } else {
                     fold_label_for_part(part)
                 },
                 tight: false,
-                kind: part.kind(),
+                role: BlockRole::of(part),
             };
             return if input {
                 ContentIoTexts::new(vec![segment], Vec::new())

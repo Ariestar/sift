@@ -904,10 +904,10 @@ pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::RECORD_SCHEMA_VERSION;
     use crate::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        WorkChannel, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime, RECORD_SCHEMA_VERSION,
     };
+    use crate::test_fixtures::shell_part;
 
     fn terminal_record(session: &str, index: usize, content: &str) -> WorkRecord {
         WorkRecord {
@@ -931,14 +931,10 @@ mod tests {
             },
             status: None,
             title: format!("record {index}"),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::Output {
-                    content: content.to_string(),
-                    ansi: None,
-                },
-            }],
+            // A terminal record carries one shell action whose output holds
+            // the content, so the round trip exercises action serialization
+            // and command projection — not a message part.
+            parts: vec![shell_part(1, Some("echo run"), Some(content))],
         }
     }
 
@@ -1056,7 +1052,9 @@ mod tests {
             .unwrap()
             .expect("capture is archived");
         assert_eq!(records[0].session.id, session_id);
-        assert_eq!(records[0].parts[1].text(), "captured");
+        // The whole capture is one shell action; its output block holds the
+        // captured text.
+        assert_eq!(records[0].parts[0].text(), "captured");
 
         assert_eq!(remove_missing_sessions(&conn, "terminal", &[]).unwrap(), 0);
         assert!(

@@ -31,7 +31,9 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::record::{WorkPartKind, WorkRecord, WorkRef};
+use crate::record::{
+    output_blocks_text, MessageRole, WorkActionStatus, WorkPart, WorkPartBody, WorkRecord, WorkRef,
+};
 
 /// Standard BM25 term-saturation and length-normalization constants. k1 sits
 /// at the top of Robertson's classic [1.2, 2.0] range: less aggressive tf
@@ -113,19 +115,48 @@ fn passage_kind_by_index(index: usize) -> PassageKind {
     }
 }
 
-/// Part-kind → passage-kind mapping; `None` means the part is not indexed.
-fn passage_kind(part_kind: WorkPartKind) -> Option<PassageKind> {
-    match part_kind {
-        WorkPartKind::Command => Some(PassageKind::Command),
-        WorkPartKind::Output => Some(PassageKind::Output),
-        WorkPartKind::Error => Some(PassageKind::Error),
-        WorkPartKind::ToolResult => Some(PassageKind::ToolResult),
-        WorkPartKind::Assistant => Some(PassageKind::Assistant),
-        WorkPartKind::User => Some(PassageKind::User),
-        WorkPartKind::Thinking => Some(PassageKind::Thinking),
-        // Tool-call payloads and skill text stay out of the ranked text — the
-        // same source the default content boolean filter reads.
-        WorkPartKind::ToolCall | WorkPartKind::Skill | WorkPartKind::Prompt => None,
+/// Part → indexed passages: `(kind, text)` pairs. A shell action contributes
+/// its command (weighted like the title — it is the structural signal) and
+/// its output as separate passages; dialogue and reasoning index whole; tool
+/// results index their payload; input-only tool calls are structural noise
+/// and stay out, same as the default content filter.
+fn part_passages(part: &WorkPart) -> Vec<(PassageKind, String)> {
+    match &part.body {
+        WorkPartBody::Message { role, content, .. } => {
+            let kind = match role {
+                MessageRole::User => PassageKind::User,
+                MessageRole::Assistant => PassageKind::Assistant,
+                MessageRole::Reasoning => PassageKind::Thinking,
+                MessageRole::System => return Vec::new(),
+            };
+            vec![(kind, content.text().into_owned())]
+        }
+        WorkPartBody::Action {
+            target,
+            input,
+            output,
+            status,
+            ..
+        } => {
+            let mut passages = Vec::new();
+            if target.is_shell() {
+                if let Some(input) = input {
+                    passages.push((PassageKind::Command, input.text().into_owned()));
+                }
+                if !output.is_empty() {
+                    let kind = match status {
+                        WorkActionStatus::Failed | WorkActionStatus::Cancelled => {
+                            PassageKind::Error
+                        }
+                        _ => PassageKind::Output,
+                    };
+                    passages.push((kind, output_blocks_text(output)));
+                }
+            } else if !output.is_empty() {
+                passages.push((PassageKind::ToolResult, output_blocks_text(output)));
+            }
+            passages
+        }
     }
 }
 
@@ -272,10 +303,10 @@ impl Bm25Index {
             );
             next_passage_id += 1;
             for part in &record.parts {
-                if let Some(kind) = passage_kind(part.kind()) {
+                for (kind, text) in part_passages(part) {
                     push_passage(
                         kind,
-                        &part.text(),
+                        &text,
                         next_passage_id,
                         &mut passage_len,
                         &mut postings,
@@ -400,15 +431,11 @@ impl Bm25Index {
     }
 }
 
-/// Body text for BM25: every part's text, skipping tool-call payloads and
-/// skill text (the same source the default content boolean filter reads).
+/// Body text for BM25: every searchable message and action representation.
 /// Used by the PRF expansion to re-tokenize the top-ranked documents.
 pub fn body_text(record: &WorkRecord) -> String {
     let mut text = String::new();
     for part in &record.parts {
-        if matches!(part.kind(), WorkPartKind::ToolCall | WorkPartKind::Skill) {
-            continue;
-        }
         text.push_str(&part.text());
         text.push('\n');
     }
@@ -418,9 +445,11 @@ pub fn body_text(record: &WorkRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::{AgentBlock, AgentBlockKind};
     use crate::record::{
-        WorkChannel, WorkOutcome, WorkPart, WorkPartData, WorkRecord, WorkRecordKind,
-        WorkSessionRef, WorkSource, WorkStatus, WorkTime, RECORD_SCHEMA_VERSION,
+        agent_parts, WorkActionStatus, WorkActor, WorkChannel, WorkContent, WorkContentBlock,
+        WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind, WorkSessionRef,
+        WorkSource, WorkStatus, WorkTarget, WorkTime, RECORD_SCHEMA_VERSION,
     };
 
     /// Rank a plain query string (test convenience over [`rank_terms_with`]).
@@ -431,6 +460,46 @@ mod tests {
             .map(|token| (token, 1.0))
             .collect::<Vec<_>>();
         index.rank_terms_with(&terms, TITLE_WEIGHT)
+    }
+
+    fn text_content(text: &str) -> WorkContent {
+        WorkContent::Text {
+            content: text.to_string(),
+            ansi: None,
+        }
+    }
+
+    fn shell_action(
+        seq: usize,
+        command: Option<&str>,
+        output: Option<&str>,
+        failed: bool,
+    ) -> WorkPart {
+        WorkPart {
+            seq,
+            occurred_at: None,
+            body: WorkPartBody::Action {
+                id: format!("shell-{seq}"),
+                actor: WorkActor::User,
+                target: WorkTarget::Shell,
+                title: None,
+                input: command.map(text_content),
+                output: output
+                    .map(|text| {
+                        vec![WorkContentBlock {
+                            content: text_content(text),
+                            start_line: None,
+                        }]
+                    })
+                    .unwrap_or_default(),
+                status: if failed {
+                    WorkActionStatus::Failed
+                } else {
+                    WorkActionStatus::Completed
+                },
+                exit_code: failed.then_some(1),
+            },
+        }
     }
 
     fn record(session: &str, index: usize, title: &str, text: &str) -> WorkRecord {
@@ -454,83 +523,40 @@ mod tests {
                 exit_code: Some(0),
             }),
             title: title.to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::Output {
-                    content: text.to_string(),
-                    ansi: None,
-                },
-            }],
+            parts: vec![shell_action(1, None, Some(text), false)],
         }
     }
 
-    /// Chat turn with typed parts: `(kind, content)` pairs.
+    /// Chat turn with typed parts: `(kind, text)` pairs. Built through the
+    /// real reducer (`agent_parts` over `AgentBlock`s), so the passage shapes
+    /// match what production parsing produces: a shell call folds its output
+    /// blocks into one action, giving Command and Output/Error passages.
+    /// An `error` part carries a parseable shell result JSON with a nonzero
+    /// exit code, matching what providers actually emit for failures.
     fn chat_record(session: &str, index: usize, title: &str, parts: &[(&str, &str)]) -> WorkRecord {
-        let mut rec = record(session, index, title, "");
-        rec.parts = parts
-            .iter()
-            .enumerate()
-            .map(|(i, (kind, text))| WorkPart {
-                seq: i + 1,
-                occurred_at: None,
-                data: part_data(kind_of(kind), text),
-            })
-            .collect();
-        rec
-    }
-
-    fn kind_of(s: &str) -> WorkPartKind {
-        match s {
-            "command" => WorkPartKind::Command,
-            "output" => WorkPartKind::Output,
-            "error" => WorkPartKind::Error,
-            "tool_result" => WorkPartKind::ToolResult,
-            "assistant" => WorkPartKind::Assistant,
-            "user" => WorkPartKind::User,
-            "thinking" => WorkPartKind::Thinking,
-            "tool_call" => WorkPartKind::ToolCall,
-            _ => WorkPartKind::Prompt,
-        }
-    }
-
-    fn part_data(kind: WorkPartKind, text: &str) -> WorkPartData {
-        match kind {
-            WorkPartKind::Command => WorkPartData::Command {
-                content: text.to_string(),
-            },
-            WorkPartKind::Output => WorkPartData::Output {
-                content: text.to_string(),
-                ansi: None,
-            },
-            WorkPartKind::Error => WorkPartData::Error {
-                content: text.to_string(),
-            },
-            WorkPartKind::ToolResult => WorkPartData::ToolResult {
-                call_id: None,
-                tool: None,
-                output: serde_json::json!(text),
+        let kind = |name: &str| match name {
+            "command" => AgentBlockKind::ToolCall,
+            "output" | "error" => AgentBlockKind::ToolOutput,
+            "user" => AgentBlockKind::User,
+            "assistant" => AgentBlockKind::Assistant,
+            _ => AgentBlockKind::Thinking,
+        };
+        let shell = |k: &str| matches!(k, "command" | "output" | "error");
+        let mut blocks = Vec::new();
+        for (k, text) in parts {
+            blocks.push(AgentBlock {
+                kind: kind(k),
+                timestamp: None,
+                label: shell(k).then(|| "bash".to_string()),
+                call_id: shell(k).then(|| format!("call-{index}")),
                 start_line: None,
-            },
-            WorkPartKind::Assistant => WorkPartData::Assistant {
-                content: text.to_string(),
-            },
-            WorkPartKind::User => WorkPartData::User {
-                content: text.to_string(),
-            },
-            WorkPartKind::Thinking => WorkPartData::Thinking {
-                content: text.to_string(),
-            },
-            WorkPartKind::ToolCall => WorkPartData::ToolCall {
-                call_id: None,
-                tool: None,
-                input: serde_json::json!({}),
-            },
-            _ => WorkPartData::Output {
-                content: text.to_string(),
-                ansi: None,
-            },
+                text: (*text).to_string(),
+            });
         }
+        let mut rec = record(session, index, title, "");
+        rec.parts.clear();
+        rec.parts = agent_parts(&blocks);
+        rec
     }
 
     #[test]
@@ -777,7 +803,10 @@ mod tests {
                 "dev",
                 1,
                 "error surface",
-                &[("error", "connection refused: no route to host")],
+                &[(
+                    "error",
+                    r#"{"stderr":"connection refused: no route to host","exit_code":1}"#,
+                )],
             ),
             chat_record(
                 "dev",

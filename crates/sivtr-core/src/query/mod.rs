@@ -370,13 +370,20 @@ mod tests {
     use super::*;
     use crate::agents::{AgentBlock, AgentBlockKind, AgentSession};
     use crate::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
+        MessageRole, Projection, WorkActionStatus, WorkActor, WorkChannel, WorkContent,
+        WorkContentBlock, WorkPart, WorkPartBody, WorkRecordKind, WorkSessionRef, WorkSource,
+        WorkTarget, WorkTime,
     };
     use crate::session_source::SessionInfo;
+    use crate::test_fixtures::message_part;
     use anyhow::Result;
     use serde::Serialize;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
+
+    fn message(seq: usize, role: MessageRole, content: &str) -> WorkPart {
+        message_part(seq, role, content)
+    }
 
     #[test]
     fn keeps_short_session_ids_when_already_unique() {
@@ -450,13 +457,11 @@ mod tests {
                 Some("session-0123456789abcdef"),
             ),
         ];
-        records[1].parts.push(WorkPart {
-            seq: 3,
-            occurred_at: None,
-            data: WorkPartData::Assistant {
-                content: "assistant with more detail".to_string(),
-            },
-        });
+        records[1].parts.push(message(
+            3,
+            MessageRole::Assistant,
+            "assistant with more detail",
+        ));
 
         dedup_records(&mut records);
 
@@ -567,20 +572,8 @@ mod tests {
             status: None,
             title: "title".to_string(),
             parts: vec![
-                WorkPart {
-                    seq: 1,
-                    occurred_at: None,
-                    data: WorkPartData::User {
-                        content: "user".to_string(),
-                    },
-                },
-                WorkPart {
-                    seq: 2,
-                    occurred_at: None,
-                    data: WorkPartData::Assistant {
-                        content: "assistant".to_string(),
-                    },
-                },
+                message(1, MessageRole::User, "user"),
+                message(2, MessageRole::Assistant, "assistant"),
             ],
         }
     }
@@ -596,76 +589,115 @@ mod tests {
             WorkPart {
                 seq: 3,
                 occurred_at: Some("2026-01-01T00:00:00Z".to_string()),
-                data: WorkPartData::Prompt {
-                    content: "prompt".to_string(),
-                    ansi: Some("\x1b[31mred\x1b[0m".to_string()),
+                body: WorkPartBody::Message {
+                    role: MessageRole::System,
+                    label: Some("prompt".to_string()),
+                    content: WorkContent::Text {
+                        content: "prompt".to_string(),
+                        ansi: Some("\x1b[31mred\x1b[0m".to_string()),
+                    },
                 },
             },
             WorkPart {
                 seq: 4,
                 occurred_at: None,
-                data: WorkPartData::Command {
-                    content: "ls -la".to_string(),
+                body: WorkPartBody::Action {
+                    id: "shell-4".to_string(),
+                    actor: WorkActor::User,
+                    target: WorkTarget::Shell,
+                    title: Some("repo>".to_string()),
+                    input: Some(WorkContent::Text {
+                        content: "ls -la".to_string(),
+                        ansi: None,
+                    }),
+                    output: vec![
+                        WorkContentBlock {
+                            content: WorkContent::Text {
+                                content: "out".to_string(),
+                                ansi: None,
+                            },
+                            start_line: None,
+                        },
+                        WorkContentBlock {
+                            content: WorkContent::Text {
+                                content: "err".to_string(),
+                                ansi: None,
+                            },
+                            start_line: None,
+                        },
+                    ],
+                    status: WorkActionStatus::Failed,
+                    exit_code: Some(1),
                 },
             },
             WorkPart {
                 seq: 5,
                 occurred_at: None,
-                data: WorkPartData::ToolCall {
-                    call_id: Some("call-1".to_string()),
-                    tool: Some("Bash".to_string()),
-                    input: serde_json::json!({
+                body: WorkPartBody::Action {
+                    id: "call-1".to_string(),
+                    actor: WorkActor::Agent,
+                    target: WorkTarget::Tool {
+                        name: Some("Read".to_string()),
+                    },
+                    title: None,
+                    input: Some(WorkContent::Json(serde_json::json!({
                         "command": "ls",
                         "nested": {"list": [1, 2, 3], "flag": true, "none": null},
                         "big": 18446744073709551615u64,
                         "float": 1.5,
-                    }),
+                    }))),
+                    output: vec![WorkContentBlock {
+                        content: WorkContent::Json(serde_json::json!({"stdout": "hi"})),
+                        start_line: Some(7),
+                    }],
+                    status: WorkActionStatus::Completed,
+                    exit_code: None,
                 },
             },
             WorkPart {
                 seq: 6,
                 occurred_at: None,
-                data: WorkPartData::ToolResult {
-                    call_id: Some("call-1".to_string()),
-                    tool: Some("Bash".to_string()),
-                    output: serde_json::json!({"exit": 0, "stdout": "hi"}),
-                    start_line: None,
+                body: WorkPartBody::Action {
+                    id: "mcp-6".to_string(),
+                    actor: WorkActor::Agent,
+                    target: WorkTarget::Mcp {
+                        server: "sivtr".to_string(),
+                        tool: "search".to_string(),
+                    },
+                    title: None,
+                    input: Some(WorkContent::Json(serde_json::json!({"query": "x"}))),
+                    output: Vec::new(),
+                    status: WorkActionStatus::InProgress,
+                    exit_code: None,
                 },
             },
             WorkPart {
                 seq: 7,
                 occurred_at: None,
-                data: WorkPartData::Skill {
-                    skill: Some("test".to_string()),
-                    content: "skill body".to_string(),
+                body: WorkPartBody::Action {
+                    id: "agent-7".to_string(),
+                    actor: WorkActor::Agent,
+                    target: WorkTarget::Agent {
+                        name: "Explore".to_string(),
+                    },
+                    title: None,
+                    input: None,
+                    output: vec![WorkContentBlock {
+                        content: WorkContent::Text {
+                            content: "\u{1}binary".to_string(),
+                            ansi: None,
+                        },
+                        start_line: None,
+                    }],
+                    status: WorkActionStatus::Cancelled,
+                    exit_code: None,
                 },
             },
-            WorkPart {
-                seq: 8,
-                occurred_at: None,
-                data: WorkPartData::Thinking {
-                    content: "think".to_string(),
-                },
-            },
-            WorkPart {
-                seq: 9,
-                occurred_at: None,
-                data: WorkPartData::Output {
-                    content: "out".to_string(),
-                    ansi: None,
-                },
-            },
-            WorkPart {
-                seq: 10,
-                occurred_at: None,
-                data: WorkPartData::Error {
-                    content: "err".to_string(),
-                },
-            },
+            message(8, MessageRole::Reasoning, "think"),
         ]);
 
         // MessagePack (rmp-serde) is map-driven, so it natively supports the
-        // flattened `WorkPart.data`, the internally-tagged `WorkPartData`, and
+        // flattened `WorkPart.body`, the internally-tagged `WorkPartBody`, and
         // `serde_json::Value` tool payloads. `with_struct_map` is required:
         // rmp's default struct-as-array encoding breaks `skip_serializing_if`
         // fields (missing trailing fields shift the array layout).
@@ -680,5 +712,7 @@ mod tests {
             record, mp_restored,
             "rmp round-trip must preserve WorkRecord"
         );
+        assert_eq!(record.project(Projection::Input).len(), 3);
+        assert_eq!(record.project(Projection::Commands).len(), 1);
     }
 }

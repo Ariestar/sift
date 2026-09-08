@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::agents::{AgentProvider, AgentSessionProvider};
 use crate::record::{
-    WorkAt, WorkOutcome, WorkPart, WorkPartKind, WorkRecord, WorkRecordKind, WorkRef,
+    output_blocks_text, WorkAt, WorkOutcome, WorkPart, WorkPartBody, WorkRecord, WorkRecordKind,
+    WorkRef, WorkTarget,
 };
 use crate::time::parse_timestamp;
 
@@ -472,7 +473,7 @@ fn matching_hits(
             WorkAt::Whole => record
                 .parts
                 .iter()
-                .filter(|part| part_matches_filters(part, filter, pattern, false))
+                .filter(|part| part_matches_filters(part, filter, pattern))
                 .map(|part| hit(record.work_ref.with_part(part.seq)))
                 .collect(),
         },
@@ -507,7 +508,7 @@ fn record_anchor_hits(
     let matched_part = record
         .parts
         .iter()
-        .any(|part| part_matches_filters(part, filter, pattern, false));
+        .any(|part| part_matches_filters(part, filter, pattern));
     (matched_meta || matched_part)
         .then(|| hit(anchor.clone()))
         .into_iter()
@@ -523,7 +524,7 @@ fn part_anchor_hit(
     let Some(part) = record.part_for_at(anchor.at) else {
         return Vec::new();
     };
-    part_matches_filters(part, filter, pattern, true)
+    part_matches_filters(part, filter, pattern)
         .then(|| hit(anchor.clone()))
         .into_iter()
         .collect()
@@ -536,37 +537,51 @@ fn hit(anchor: WorkRef) -> ScoredHit {
     }
 }
 
-fn part_matches_filters(
-    part: &WorkPart,
-    filter: &Filter,
-    pattern: Option<&Regex>,
-    pinned: bool,
-) -> bool {
-    if filter.kind.is_some_and(|kind| !kind.matches(part.kind())) {
+fn part_matches_filters(part: &WorkPart, filter: &Filter, pattern: Option<&Regex>) -> bool {
+    if filter.kind.is_some_and(|kind| !kind.matches(part)) {
         return false;
     }
-    if !part_field_matches(part, filter.in_field) {
+    if !part_in_field(part, filter.in_field) {
         return false;
     }
-    // Default content search covers the same text BM25 ranks: dialogue turns,
-    // terminal output, tool results (execution errors), and thinking (error
-    // reasoning). Tool-call payloads and skill text stay out as noise; they
-    // remain reachable with `--kind` or `--in all`.
-    if !pinned
-        && matches!(filter.in_field, Field::Content)
-        && filter.kind.is_none()
-        && matches!(part.kind(), WorkPartKind::ToolCall | WorkPartKind::Skill)
-    {
-        return false;
-    }
-    pattern.is_none_or(|pattern| text_has_matching_line(&part.text(), pattern))
+    // The field bound picks the text the pattern reads: the action's own
+    // slice, so a shell action's Command query cannot match its output.
+    pattern.is_none_or(|pattern| {
+        text_has_matching_line(&part_field_text(part, filter.in_field), pattern)
+    })
 }
 
-fn part_field_matches(part: &WorkPart, field: Field) -> bool {
+fn part_in_field(part: &WorkPart, field: Field) -> bool {
     matches!(field, Field::Content | Field::All)
-        || matches!(field, Field::Input) && part.kind().is_input()
-        || matches!(field, Field::Output) && part.kind().is_output()
-        || matches!(field, Field::Command) && part.kind() == WorkPartKind::Command
+        || matches!(field, Field::Input) && part.is_input()
+        || matches!(field, Field::Output) && part.is_output()
+        || matches!(field, Field::Command)
+            && matches!(
+                &part.body,
+                WorkPartBody::Action {
+                    target: WorkTarget::Shell,
+                    ..
+                }
+            )
+}
+
+/// The text `field` scopes this part to: an action reads its own slice —
+/// input side for Input/Command, result side for Output — while whole parts
+/// keep their full text.
+fn part_field_text(part: &WorkPart, field: Field) -> String {
+    match field {
+        Field::Input | Field::Command => match &part.body {
+            WorkPartBody::Action {
+                input: Some(input), ..
+            } => input.text().into_owned(),
+            _ => String::new(),
+        },
+        Field::Output => match &part.body {
+            WorkPartBody::Action { output, .. } => output_blocks_text(output),
+            _ => String::new(),
+        },
+        _ => part.text().into_owned(),
+    }
 }
 
 fn meta_matches(record: &WorkRecord, field: Field, pattern: Option<&Regex>) -> bool {
@@ -752,41 +767,13 @@ fn comparable_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::{
-        WorkChannel, WorkPart, WorkPartData, WorkRecord, WorkSessionRef, WorkSource, WorkStatus,
-        WorkTime, RECORD_SCHEMA_VERSION,
-    };
+    use crate::record::{MessageRole, WorkStatus, WorkTime};
+    use crate::test_fixtures::{message_part, terminal_record};
 
     fn record(session: &str, index: usize, title: &str, text: &str) -> WorkRecord {
-        WorkRecord {
-            schema_version: RECORD_SCHEMA_VERSION,
-            work_ref: WorkRef::terminal(session, index),
-            kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
-            session: WorkSessionRef {
-                id: session.to_string(),
-                canonical_id: None,
-                path: None,
-            },
-            cwd: None,
-            time: WorkTime::default(),
-            status: Some(WorkStatus {
-                outcome: WorkOutcome::Success,
-                exit_code: Some(0),
-            }),
-            title: title.to_string(),
-            parts: vec![WorkPart {
-                seq: 1,
-                occurred_at: None,
-                data: WorkPartData::Output {
-                    content: text.to_string(),
-                    ansi: None,
-                },
-            }],
-        }
+        let mut record = terminal_record(session, index, title, "");
+        record.parts = vec![message_part(1, MessageRole::Assistant, text)];
+        record
     }
 
     fn anchors(records: &[WorkRecord]) -> Vec<WorkRef> {
@@ -932,13 +919,9 @@ mod tests {
     #[test]
     fn parts_mode_emits_one_hit_per_part() {
         let mut records = vec![record("s1", 1, "turn", "hello")];
-        records[0].parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::Assistant {
-                content: "world".into(),
-            },
-        });
+        records[0]
+            .parts
+            .push(message_part(2, MessageRole::Assistant, "world"));
         let filter = Filter {
             mode: FilterMode::Parts,
             pattern: Some("hello".into()),
@@ -952,16 +935,47 @@ mod tests {
     }
 
     #[test]
+    fn command_field_does_not_match_a_shell_action_output() {
+        // One shell action carries command `cargo build` and output with the
+        // needle; the Command query's pattern must read the action's own
+        // slice rather than the whole part text. The Output query matches.
+        let mut records = vec![record("s1", 1, "turn", "placeholder")];
+        records[0].parts = vec![crate::test_fixtures::shell_part(
+            1,
+            Some("cargo build"),
+            Some("needle in the build log"),
+        )];
+
+        let command_hit = Filter {
+            mode: FilterMode::Parts,
+            pattern: Some("needle".into()),
+            in_field: Field::Command,
+            ..Filter::none()
+        };
+        assert!(Searcher::new(&records)
+            .search(&command_hit, &anchors(&records), Path::new("."))
+            .expect("command search")
+            .is_empty());
+
+        let output_hit = Filter {
+            mode: FilterMode::Parts,
+            pattern: Some("needle".into()),
+            in_field: Field::Output,
+            ..Filter::none()
+        };
+        let hits = Searcher::new(&records)
+            .search(&output_hit, &anchors(&records), Path::new("."))
+            .expect("output search");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].anchor.to_string(), "terminal/s1/1/p1");
+    }
+
+    #[test]
     fn content_line_matches_reports_part_and_line() {
         let mut records = [record("s1", 1, "turn", "first line\nneedle here")];
-        records[0].parts.push(WorkPart {
-            seq: 2,
-            occurred_at: None,
-            data: WorkPartData::Output {
-                content: "no match".into(),
-                ansi: None,
-            },
-        });
+        records[0]
+            .parts
+            .push(message_part(2, MessageRole::Assistant, "no match"));
         let regex = Regex::new("needle").expect("regex");
         let matches = content_line_matches(&records[0], &regex);
         assert_eq!(matches.len(), 1);
