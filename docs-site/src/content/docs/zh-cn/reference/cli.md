@@ -888,6 +888,26 @@ sivtr hotkey status
 sivtr hotkey stop
 ```
 
+## web
+
+```bash
+sivtr web [--port <PORT>] [--host <HOST>]
+```
+
+在统一 archive 之上提供本地 web UI 和只读 JSON API：session 浏览器（按 provider 过滤、打开 session、复制 refs）和按 BM25 相关性排序的全文搜索。
+
+| 选项 | 含义 |
+| --- | --- |
+| `--port <PORT>` | 要绑定的 TCP 端口（默认 `8080`） |
+| `--host <HOST>` | 仅 loopback 绑定地址（默认 `127.0.0.1`）。非 loopback 值会被拒绝。 |
+
+server 只绑定 loopback，并校验浏览器 `Host` header 以防范 DNS rebinding。HTTP API 是只读的；启动时可能通过 `ensure_fresh()` 刷新本地 archive。在 loopback 绑定下数据也不会离开本机。详见 [Web UI](/zh-cn/usage/web-ui/)。
+
+```bash
+sivtr web
+sivtr web --port 8081
+```
+
 ## sync
 
 ```bash

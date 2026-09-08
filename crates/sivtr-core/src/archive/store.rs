@@ -430,6 +430,136 @@ pub fn provider_stamps(
     Ok(rows.into_iter().collect())
 }
 
+/// Session metadata for listings and API responses.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionMeta {
+    pub provider: String,
+    pub session_id: String,
+    pub title: Option<String>,
+    pub cwd: Option<String>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub record_count: i64,
+}
+
+/// Per-provider archive totals.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderCount {
+    pub provider: String,
+    pub sessions: i64,
+    pub records: i64,
+}
+
+/// List archived session metadata, newest-first, optionally filtered by
+/// provider and offset-paginated. Used by listings and the web API.
+pub fn list_sessions_meta(
+    conn: &Connection,
+    provider: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<SessionMeta>> {
+    let sql = match provider {
+        Some(_) => {
+            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+             FROM sessions WHERE provider = ?1
+             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
+             LIMIT ?2 OFFSET ?3"
+        }
+        None => {
+            "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+             FROM sessions
+             ORDER BY COALESCE(ended_at, started_at, synced_at) DESC, id DESC
+             LIMIT ?1 OFFSET ?2"
+        }
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let map_row = |row: &rusqlite::Row| {
+        Ok(SessionMeta {
+            provider: row.get(0)?,
+            session_id: row.get(1)?,
+            title: row.get(2)?,
+            cwd: row.get(3)?,
+            started_at: row.get(4)?,
+            ended_at: row.get(5)?,
+            record_count: row.get(6)?,
+        })
+    };
+    let rows = match provider {
+        Some(provider) => stmt
+            .query_map(params![provider, limit, offset], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        None => stmt
+            .query_map(params![limit, offset], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+    };
+    Ok(rows)
+}
+
+/// Session and record totals per provider, alphabetical by provider name.
+pub fn provider_counts(conn: &Connection) -> Result<Vec<ProviderCount>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.provider, COUNT(DISTINCT s.id), COALESCE(SUM(s.record_count), 0)
+         FROM sessions s GROUP BY s.provider ORDER BY s.provider ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ProviderCount {
+                provider: row.get(0)?,
+                sessions: row.get(1)?,
+                records: row.get(2)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// One session's metadata by its archive key.
+pub fn session_meta_by_key(
+    conn: &Connection,
+    provider: &str,
+    session_id: &str,
+) -> Result<Option<SessionMeta>> {
+    conn.query_row(
+        "SELECT provider, session_id, title, cwd, started_at, ended_at, record_count
+         FROM sessions WHERE provider = ?1 AND session_id = ?2",
+        params![provider, session_id],
+        |row| {
+            Ok(SessionMeta {
+                provider: row.get(0)?,
+                session_id: row.get(1)?,
+                title: row.get(2)?,
+                cwd: row.get(3)?,
+                started_at: row.get(4)?,
+                ended_at: row.get(5)?,
+                record_count: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .context("Failed to read archived session metadata")
+}
+
+/// Load one session's records by its archive key (provider + session id).
+pub fn load_records_by_key(
+    conn: &Connection,
+    provider: &str,
+    session_id: &str,
+    mode: BlobMode,
+) -> Result<Option<Vec<WorkRecord>>> {
+    let row: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM sessions WHERE provider = ?1 AND session_id = ?2",
+            params![provider, session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("Failed to look up archived session")?;
+    match row {
+        Some(row) => load_records_by_row(conn, row, mode).map(Some),
+        None => Ok(None),
+    }
+}
+
 /// Read/write the archive_meta key/value table (sync bookkeeping).
 pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>> {
     conn.query_row(
