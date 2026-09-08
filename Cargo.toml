@@ -94,7 +94,7 @@ iroh = "1.0"
 base64 = "0.23"
 anyhow = "1"
 arboard = "3"
-dirs = "6"
+dirs = "7"
 regex = "1"
 similar = "3"
 serde = { version = "1", features = ["derive"] }
