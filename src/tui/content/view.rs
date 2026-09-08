@@ -1177,18 +1177,20 @@ fn block_dot_lines(
     Text::from(lines)
 }
 
-/// Dot color by block role: the same palette the pane uses for roles, so a
-/// conversation's dots read like chat bubbles (user, tool, thinking, ...).
+/// Dot color by part kind: dialogue parts (user/assistant) carry the default
+/// text color; structure parts (thinking/system/shell/tool/agent) share one
+/// muted light color; failure is status, not decoration.
 fn block_dot_color(role: Option<BlockRole>) -> Color {
     match role {
-        Some(BlockRole::User) => crate::tui::theme::user(),
-        Some(BlockRole::Assistant) => Color::Reset,
-        Some(BlockRole::Reasoning | BlockRole::System) => crate::tui::theme::muted(),
         Some(BlockRole::Failed) => crate::tui::theme::failure(),
-        Some(BlockRole::Shell | BlockRole::Tool | BlockRole::Agent) => {
-            crate::tui::theme::structure_color(false)
-        }
-        None => crate::tui::theme::muted(),
+        Some(
+            BlockRole::Reasoning
+            | BlockRole::System
+            | BlockRole::Shell
+            | BlockRole::Tool
+            | BlockRole::Agent,
+        ) => crate::tui::theme::muted(),
+        Some(BlockRole::User | BlockRole::Assistant) | None => Color::Reset,
     }
 }
 
@@ -1479,10 +1481,9 @@ mod tests {
         assert_eq!(rendered.lines.len(), 2);
         assert_eq!(rendered.lines[0].spans[0].content.as_ref(), "## ");
         assert_eq!(rendered.lines[0].spans[1].content.as_ref(), "User");
-        assert_eq!(
-            rendered.lines[0].spans[1].style.fg,
-            Some(crate::tui::theme::user())
-        );
+        // Heading color depends on the level alone, not the text: an h2
+        // renders in the default foreground.
+        assert_eq!(rendered.lines[0].spans[1].style.fg, None);
         assert!(rendered.lines[1].spans[0]
             .style
             .add_modifier

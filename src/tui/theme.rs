@@ -54,10 +54,6 @@ pub(crate) struct Theme {
     pub(crate) link: Color,
     pub(crate) quote: Color,
     pub(crate) success: Color,
-    pub(crate) user: Color,
-    pub(crate) output: Color,
-    pub(crate) structure: Color,
-    pub(crate) structure_result: Color,
 }
 
 /// The four agent-label colors for one provider, one per palette. Chosen by
@@ -179,28 +175,24 @@ impl Theme {
     pub(crate) const fn dark() -> Self {
         Self {
             mode: PaletteMode::Dark,
-            accent: Color::Rgb(56, 189, 248),           // sky-400
-            muted: Color::Rgb(100, 116, 139),           // slate-500
-            dim: Color::Rgb(71, 85, 105),               // slate-600
-            local_origin: Color::Rgb(52, 211, 153),     // emerald-400
-            remote_origin: Color::Rgb(244, 114, 182),   // pink-400
-            focus_bg: Color::Rgb(15, 23, 42),           // slate-900 (veil tint)
-            selected_bg: Color::Rgb(51, 65, 85),        // slate-700
-            selected_fg: Color::Rgb(226, 232, 240),     // slate-200
-            range_fg: Color::Rgb(251, 191, 36),         // amber-400
-            title_active: Color::Rgb(224, 242, 254),    // sky-100
-            muted_text: Color::Rgb(203, 213, 225),      // slate-300
-            key_hint: Color::Rgb(125, 211, 252),        // sky-300
-            footer: Color::Rgb(148, 163, 184),          // slate-400
-            failure: Color::Rgb(248, 113, 113),         // red-400
-            code: Color::Rgb(148, 163, 184),            // slate-400
-            link: Color::Rgb(125, 211, 252),            // sky-300
-            quote: Color::Rgb(52, 211, 153),            // emerald-400
-            success: Color::Rgb(74, 222, 128),          // green-400
-            user: Color::Rgb(34, 211, 238),             // cyan-400
-            output: Color::Rgb(96, 165, 250),           // blue-400
-            structure: Color::Rgb(251, 191, 36),        // amber-400
-            structure_result: Color::Rgb(56, 189, 248), // sky-400
+            accent: Color::Rgb(56, 189, 248),         // sky-400
+            muted: Color::Rgb(100, 116, 139),         // slate-500
+            dim: Color::Rgb(71, 85, 105),             // slate-600
+            local_origin: Color::Rgb(52, 211, 153),   // emerald-400
+            remote_origin: Color::Rgb(244, 114, 182), // pink-400
+            focus_bg: Color::Rgb(15, 23, 42),         // slate-900 (veil tint)
+            selected_bg: Color::Rgb(51, 65, 85),      // slate-700
+            selected_fg: Color::Rgb(226, 232, 240),   // slate-200
+            range_fg: Color::Rgb(251, 191, 36),       // amber-400
+            title_active: Color::Rgb(224, 242, 254),  // sky-100
+            muted_text: Color::Rgb(203, 213, 225),    // slate-300
+            key_hint: Color::Rgb(125, 211, 252),      // sky-300
+            footer: Color::Rgb(148, 163, 184),        // slate-400
+            failure: Color::Rgb(248, 113, 113),       // red-400
+            code: Color::Rgb(148, 163, 184),          // slate-400
+            link: Color::Rgb(125, 211, 252),          // sky-300
+            quote: Color::Rgb(52, 211, 153),          // emerald-400
+            success: Color::Rgb(74, 222, 128),        // green-400
         }
     }
 
@@ -208,28 +200,24 @@ impl Theme {
     pub(crate) const fn light() -> Self {
         Self {
             mode: PaletteMode::Light,
-            accent: Color::Rgb(2, 132, 199),           // sky-600
-            muted: Color::Rgb(100, 116, 139),          // slate-500
-            dim: Color::Rgb(148, 163, 184),            // slate-400
-            local_origin: Color::Rgb(5, 150, 105),     // emerald-600
-            remote_origin: Color::Rgb(219, 39, 119),   // pink-600
-            focus_bg: Color::Rgb(241, 245, 249),       // slate-100 (faint gray tint)
-            selected_bg: Color::Rgb(226, 232, 240),    // slate-200
-            selected_fg: Color::Rgb(51, 65, 85),       // slate-700
-            range_fg: Color::Rgb(217, 119, 6),         // amber-600
-            title_active: Color::Rgb(15, 23, 42),      // slate-900
-            muted_text: Color::Rgb(100, 116, 139),     // slate-500
-            key_hint: Color::Rgb(3, 105, 161),         // sky-700
-            footer: Color::Rgb(71, 85, 105),           // slate-600
-            failure: Color::Rgb(220, 38, 38),          // red-600
-            code: Color::Rgb(71, 85, 105),             // slate-600
-            link: Color::Rgb(3, 105, 161),             // sky-700
-            quote: Color::Rgb(5, 150, 105),            // emerald-600
-            success: Color::Rgb(22, 163, 74),          // green-600
-            user: Color::Rgb(8, 145, 178),             // cyan-600
-            output: Color::Rgb(37, 99, 235),           // blue-600
-            structure: Color::Rgb(217, 119, 6),        // amber-600
-            structure_result: Color::Rgb(2, 132, 199), // sky-600
+            accent: Color::Rgb(2, 132, 199),         // sky-600
+            muted: Color::Rgb(100, 116, 139),        // slate-500
+            dim: Color::Rgb(148, 163, 184),          // slate-400
+            local_origin: Color::Rgb(5, 150, 105),   // emerald-600
+            remote_origin: Color::Rgb(219, 39, 119), // pink-600
+            focus_bg: Color::Rgb(241, 245, 249),     // slate-100 (faint gray tint)
+            selected_bg: Color::Rgb(226, 232, 240),  // slate-200
+            selected_fg: Color::Rgb(51, 65, 85),     // slate-700
+            range_fg: Color::Rgb(217, 119, 6),       // amber-600
+            title_active: Color::Rgb(15, 23, 42),    // slate-900
+            muted_text: Color::Rgb(100, 116, 139),   // slate-500
+            key_hint: Color::Rgb(3, 105, 161),       // sky-700
+            footer: Color::Rgb(71, 85, 105),         // slate-600
+            failure: Color::Rgb(220, 38, 38),        // red-600
+            code: Color::Rgb(71, 85, 105),           // slate-600
+            link: Color::Rgb(3, 105, 161),           // sky-700
+            quote: Color::Rgb(5, 150, 105),          // emerald-600
+            success: Color::Rgb(22, 163, 74),        // green-600
         }
     }
 
@@ -257,10 +245,6 @@ impl Theme {
             link: Color::Blue,
             quote: Color::Green,
             success: Color::Green,
-            user: Color::Cyan,
-            output: Color::Blue,
-            structure: Color::Yellow,
-            structure_result: Color::Blue,
         }
     }
 
@@ -289,10 +273,6 @@ impl Theme {
             link: Color::Blue,
             quote: Color::DarkGray,
             success: Color::Blue,
-            user: Color::Magenta,
-            output: Color::Blue,
-            structure: Color::Red,
-            structure_result: Color::Blue,
         }
     }
 }
@@ -493,27 +473,6 @@ pub(crate) fn success() -> Color {
     ACTIVE.get().success
 }
 
-/// User role headings.
-pub(crate) fn user() -> Color {
-    ACTIVE.get().user
-}
-
-/// Output role headings.
-pub(crate) fn output() -> Color {
-    ACTIVE.get().output
-}
-
-/// Color for the `## Command` dialogue heading and structural roles. Result
-/// channels (`… result:>`) lean blue, everything else yellow.
-pub(crate) fn structure_color(is_result: bool) -> Color {
-    let theme = ACTIVE.get();
-    if is_result {
-        theme.structure_result
-    } else {
-        theme.structure
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,10 +559,6 @@ mod tests {
             ("link", light.link),
             ("quote", light.quote),
             ("success", light.success),
-            ("user", light.user),
-            ("output", light.output),
-            ("structure", light.structure),
-            ("structure result", light.structure_result),
         ] {
             assert_dark_foreground(name, color);
         }
