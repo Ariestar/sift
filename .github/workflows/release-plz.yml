@@ -42,7 +42,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Create or update Release PR
-        uses: release-plz/action@v0.5.134
+        uses: release-plz/action@v0.5.135
         with:
           command: release-pr
         env:
