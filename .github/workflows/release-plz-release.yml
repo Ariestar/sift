@@ -29,7 +29,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Tag release
-        uses: release-plz/action@v0.5.134
+        uses: release-plz/action@v0.5.135
         with:
           command: release
         env:
