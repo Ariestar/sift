@@ -71,7 +71,6 @@ With `sivtr`, you can:
 - **Usage and costs**: extract transcript token usage and calculate costs with exact integer microdollars and an embedded pricing snapshot; unknown prices stay explicitly unpriced.
 - **Optional semantic / hybrid search**: configure an OpenAI-compatible embedding endpoint for vector ranking or RRF fusion with BM25; structured search remains complete without it.
 - **Stats, quality, and portable import/export**: `stats`, secret findings, starred sessions, Claude.ai/ChatGPT JSON/ZIP import, and JSON/JSONL/Markdown/HTML export.
-- **Local Web UI**: `sivtr web` serves a loopback dashboard and JSON API over the same unified archive.
 - **Cross-device access**: share a workspace read-only and browse another device with a `desk:...` ref; multiple devices can form a `group` that syncs membership and lets members read each other's memory.
 - **Configurable theme**: `[theme] mode = auto|dark|light`, follows the system appearance and detects truecolor.
 - **One-command setup**: `sivtr setup` for hooks + MCP host install; `sivtr doctor --fix` to repair.
@@ -123,7 +122,6 @@ Sync and inspect the archive:
 sivtr sync
 sivtr usage daily
 sivtr stats
-sivtr web
 ```
 
 > [!NOTE]
