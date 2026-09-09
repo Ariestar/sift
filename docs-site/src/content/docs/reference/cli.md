@@ -881,26 +881,6 @@ sivtr hotkey status
 sivtr hotkey stop
 ```
 
-## web
-
-```bash
-sivtr web [--port <PORT>] [--host <HOST>]
-```
-
-Serves a local web UI and a read-only JSON API over the unified archive: a session browser (filter by provider, open a session, copy refs) and full-text search with BM25 relevance ranking.
-
-| Option | Meaning |
-| --- | --- |
-| `--port <PORT>` | TCP port to bind (default `8080`) |
-| `--host <HOST>` | Loopback bind address (default `127.0.0.1`). Non-loopback values are rejected. |
-
-The server only binds loopback and validates the browser `Host` header to guard against DNS rebinding. The HTTP API is read-only; startup may refresh the local archive via `ensure_fresh()`. With a loopback bind, data never leaves the machine. See [Web UI](/usage/web-ui/).
-
-```bash
-sivtr web
-sivtr web --port 8081
-```
-
 ## sync
 
 ```bash

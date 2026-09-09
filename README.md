@@ -62,7 +62,6 @@
 - **用量与成本**：从 transcript 提取 token usage，用精确微美元整数和内置 pricing snapshot 计算成本；未知价格明确显示为 unpriced，不猜价格。
 - **可选 semantic / hybrid search**：配置一个 OpenAI-compatible embedding endpoint 后，用向量排序或 RRF 融合 BM25；不配置时结构化搜索仍完整可用。
 - **统计、质量和可移植导入导出**：`stats`、secret findings、starred sessions、Claude.ai/ChatGPT JSON/ZIP 导入，以及 JSON/JSONL/Markdown/HTML 导出。
-- **本地 Web UI**：`sivtr web` 提供 loopback dashboard 和 JSON API，直接读取同一 unified archive。
 - **跨设备访问**：只读分享 workspace，用 `desk:...` ref 像读本地一样浏览另一台设备；多设备还能组成 `group`，成员间自动同步、一次 `sync` 拉齐。
 - **主题可配**：`[theme] mode = auto|dark|light`，自动跟随系统外观并检测 truecolor。
 - **一键安装与诊断**：`sivtr setup` 装 hooks + MCP；`sivtr doctor --fix` 自动修复。
@@ -114,7 +113,6 @@ sivtr doctor
 sivtr sync
 sivtr usage daily
 sivtr stats
-sivtr web
 ```
 
 > [!NOTE]
