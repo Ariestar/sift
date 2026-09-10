@@ -3,7 +3,7 @@ members = ["crates/sivtr-core", "."]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.95"
@@ -78,7 +78,7 @@ pkg-url = "{ repo }/releases/download/v{ version }/sivtr-v{ version }-macos.tar.
 bin-dir = "sivtr-v{ version }-macos/{ bin }{ binary-ext }"
 
 [dependencies]
-sivtr-core = { version = "0.7.1", path = "crates/sivtr-core" }
+sivtr-core = { version = "0.8.0", path = "crates/sivtr-core" }
 chrono = { version = "0.4", features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
